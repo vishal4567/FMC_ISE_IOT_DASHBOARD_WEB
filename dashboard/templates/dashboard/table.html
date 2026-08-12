@@ -1,0 +1,69 @@
+{% extends "dashboard/base.html" %}
+{% load dashboard_extras %}
+{% block title %}{{ dataset.label }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard:index' %}">Overview</a></li>
+    <li class="breadcrumb-item active">{{ dataset.label }}</li>
+  </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-start flex-wrap mb-3">
+  <div>
+    <h3 class="mb-1">
+      {{ dataset.label }}
+      <span class="badge {% if dataset.source == 'ISE' %}bg-info{% else %}bg-warning text-dark{% endif %} align-middle">
+        {{ dataset.source }}
+      </span>
+    </h3>
+    <div class="text-muted">{{ dataset.description }}</div>
+    <div class="small text-muted">Maps to: {{ dataset.widget }}</div>
+  </div>
+  <div class="text-end">
+    <a href="{% url 'dashboard:dataset_csv' dataset.key %}" class="btn btn-sm btn-success">⬇ Export CSV</a>
+    <a href="?refresh=1" class="btn btn-sm btn-outline-primary">↻ Refresh</a>
+    <div class="small text-muted mt-1">
+      {% if cached %}served from cache{% else %}fresh from API{% endif %}
+    </div>
+  </div>
+</div>
+
+{% if error %}
+  <div class="alert alert-danger">
+    <strong>Could not fetch this dataset.</strong><br>{{ error }}
+  </div>
+{% elif not rows %}
+  <div class="alert alert-secondary">No records returned.</div>
+{% else %}
+  <div class="mb-2 text-muted small">{{ rows|length }} record(s)</div>
+  <div class="table-responsive">
+    <table id="data-table" class="table table-sm table-striped table-hover align-middle w-100">
+      <thead class="table-dark">
+        <tr>{% for col in columns %}<th>{{ col }}</th>{% endfor %}</tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          {% for col in columns %}<td>{{ row|dictkey:col }}</td>{% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  $(function () {
+    $('#data-table').DataTable({
+      pageLength: 25,
+      lengthMenu: [10, 25, 50, 100],
+      order: [],
+      language: { search: "Search (MAC / IP / hostname / type):" }
+    });
+  });
+</script>
+{% endblock %}

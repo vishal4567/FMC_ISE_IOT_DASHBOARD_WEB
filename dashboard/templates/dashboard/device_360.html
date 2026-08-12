@@ -1,0 +1,203 @@
+{% extends "dashboard/base.html" %}
+{% load dashboard_extras %}
+{% block title %}Device 360 · {{ mac }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard:index' %}">Dashboard</a></li>
+    <li class="breadcrumb-item"><a href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}">Devices at Risk</a></li>
+    <li class="breadcrumb-item active">Device 360</li>
+  </ol>
+</nav>
+
+{% if not d.found %}
+  <div class="alert alert-warning">No events found for device <code>{{ mac }}</code>.</div>
+{% else %}
+
+<!-- Header -->
+<div class="card shadow-sm mb-3">
+  <div class="card-body d-flex flex-wrap justify-content-between align-items-center">
+    <div>
+      <h3 class="mb-1">🖥️ {{ d.identity.hostname }}
+        <span class="badge
+          {% if d.risk.highest_severity == 'Critical' %}bg-danger
+          {% elif d.risk.highest_severity == 'High' %}bg-warning text-dark
+          {% elif d.risk.highest_severity == 'Medium' %}bg-info text-dark
+          {% else %}bg-secondary{% endif %} align-middle">{{ d.risk.highest_severity }} risk</span>
+      </h3>
+      <div class="text-muted">
+        <code>{{ d.identity.mac }}</code> · {{ d.identity.ip }} ·
+        {{ d.identity.device_type }} · {{ d.identity.location }}
+      </div>
+    </div>
+    <div class="text-end small text-muted">
+      First seen {{ d.risk.first_seen }}<br>Last seen {{ d.risk.last_seen }}
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <!-- Identity & correlation (ISE) -->
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100"><div class="card-body">
+      <h6 class="card-title"><span class="badge bg-info">ISE</span> Identity &amp; Correlation</h6>
+      <table class="table table-sm mb-0">
+        <tr><th>Correlation</th><td>
+          {% if d.ise.correlation == 'Matched (same MAC)' %}<span class="badge bg-success">Matched (same MAC)</span>
+          {% elif d.ise.correlation == 'Manually mapped' %}<span class="badge bg-primary">Manually mapped</span>
+          {% else %}<span class="badge bg-secondary">FMC-only</span>{% endif %}
+        </td></tr>
+        <tr><th>ISE endpoint MAC</th><td>{% if d.ise.ise_mac %}<code>{{ d.ise.ise_mac }}</code>{% else %}—{% endif %}</td></tr>
+        <tr><th>Identity group</th><td>{{ d.ise.identity_group }}</td></tr>
+        <tr><th>Profiler profile</th><td>{{ d.ise.profile }}</td></tr>
+        <tr><th>Quarantined</th><td>{% if d.ise.quarantined %}<span class="text-danger fw-bold">Yes</span>{% else %}No{% endif %}</td></tr>
+      </table>
+    </div></div>
+  </div>
+
+  <!-- Risk KPIs -->
+  <div class="col-lg-8">
+    <div class="card shadow-sm h-100"><div class="card-body">
+      <h6 class="card-title">Risk Summary</h6>
+      <div class="row text-center g-2">
+        <div class="col"><div class="h3 mb-0">{{ d.risk.total_events }}</div><div class="small text-muted">Events</div></div>
+        <div class="col"><div class="h3 mb-0 text-danger">{{ d.risk.threat_events }}</div><div class="small text-muted">Threats</div></div>
+        <div class="col"><div class="h3 mb-0">{{ d.risk.blocked }}</div><div class="small text-muted">Blocked</div></div>
+        <div class="col"><div class="h3 mb-0">{{ d.traffic.total_mb }}</div><div class="small text-muted">Total MB</div></div>
+      </div>
+      <hr>
+      <div class="small"><strong>Threat types:</strong> {{ d.risk.threat_types|default:"—" }}</div>
+      <div class="mt-2">
+        {% if d.flags.insecure_protocol %}<span class="badge bg-danger">Insecure protocol: {{ d.flags.insecure_apps }}</span>{% endif %}
+        {% if d.flags.zone_violation %}<span class="badge bg-warning text-dark">Outside allowed zone</span>{% endif %}
+      </div>
+    </div></div>
+  </div>
+</div>
+
+<!-- Charts -->
+<div class="row g-3 mt-1">
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100"><div class="card-body">
+      <h6 class="card-title">Severity breakdown</h6>
+      <canvas id="devSeverity" height="200"></canvas>
+    </div></div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm h-100"><div class="card-body">
+      <h6 class="card-title">Activity — last 7 days</h6>
+      <canvas id="devDaily" height="90"></canvas>
+    </div></div>
+  </div>
+</div>
+
+<!-- Traffic + Policy -->
+<div class="row g-3 mt-1">
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100"><div class="card-body">
+      <h6 class="card-title">Traffic summary</h6>
+      <div class="row">
+        <div class="col-6">
+          <div class="small text-muted">Top destination countries</div>
+          <ul class="list-unstyled small mb-2">
+            {% for c, n in d.top_countries %}<li>{{ c }} <span class="badge bg-light text-dark">{{ n }}</span></li>{% endfor %}
+          </ul>
+        </div>
+        <div class="col-6">
+          <div class="small text-muted">Top applications</div>
+          <ul class="list-unstyled small mb-2">
+            {% for a, n in d.top_apps %}<li>{{ a }} <span class="badge bg-light text-dark">{{ n }}</span></li>{% endfor %}
+          </ul>
+        </div>
+      </div>
+      <div class="small text-muted">Sent {{ d.traffic.sent_mb }} MB · Received {{ d.traffic.recv_mb }} MB</div>
+    </div></div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card shadow-sm h-100"><div class="card-body">
+      <h6 class="card-title"><span class="badge bg-warning text-dark">FMC</span> Policy &amp; enforcement</h6>
+      <div class="small"><strong>Access rules:</strong> {{ d.policy.rules|join:", " }}</div>
+      <div class="small"><strong>IPS policies:</strong> {{ d.policy.ips|join:", " }}</div>
+      <div class="small"><strong>Firewalls:</strong> {{ d.policy.firewalls|join:", " }}</div>
+      <div class="small"><strong>Zones seen:</strong> {{ d.policy.zones|slice:":10"|join:", " }}{% if d.policy.zones|length > 10 %} …{% endif %}</div>
+    </div></div>
+  </div>
+</div>
+
+<!-- Recommendations -->
+<div class="card shadow-sm mt-3">
+  <div class="card-body">
+    <h6 class="card-title">Recommended actions <span class="badge bg-secondary">advisory</span></h6>
+    <ul class="mb-0">
+      {% for r in d.recommendations %}<li>{{ r }}</li>{% endfor %}
+    </ul>
+  </div>
+</div>
+
+<!-- Events table -->
+<div class="card shadow-sm mt-3"><div class="card-body">
+  <h6 class="card-title">Threat &amp; connection events for this device ({{ d.events|length }})</h6>
+  <div class="table-responsive">
+    <table id="dev-events" class="table table-sm table-striped table-hover w-100">
+      <thead class="table-dark"><tr>
+        <th>Time</th><th>Type</th><th>Severity</th><th>Threat</th><th>Action</th>
+        <th>Dest IP</th><th>Country</th><th>App</th><th>Proto/Port</th><th>Rule</th>
+      </tr></thead>
+      <tbody>
+        {% for e in d.events %}
+        <tr>
+          <td>{{ e.timestamp }}</td>
+          <td>{{ e.event_type }}</td>
+          <td>{{ e.severity }}</td>
+          <td class="small">{{ e.threat_name }}</td>
+          <td>{{ e.action }}</td>
+          <td>{{ e.dest_ip }}</td>
+          <td>{{ e.dest_country }}</td>
+          <td>{{ e.application }}</td>
+          <td>{{ e.protocol }}/{{ e.port }}</td>
+          <td class="small">{{ e.rule_matched }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if d.found %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  const severity = {{ severity_json|safe }};
+  const daily = {{ daily_json|safe }};
+  const sevColors = {Critical:'#dc3545',High:'#fd7e14',Medium:'#0dcaf0',Low:'#6c757d',Informational:'#adb5bd'};
+
+  new Chart(document.getElementById('devSeverity'), {
+    type: 'doughnut',
+    data: { labels: severity.map(s=>s.severity),
+      datasets:[{ data: severity.map(s=>s.count),
+        backgroundColor: severity.map(s=>sevColors[s.severity]) }] },
+    options: { plugins:{ legend:{ position:'bottom' } } }
+  });
+
+  new Chart(document.getElementById('devDaily'), {
+    data: { labels: daily.map(d=>d.day.slice(5)),
+      datasets:[
+        { type:'bar', label:'Traffic (MB)', yAxisID:'y',
+          data: daily.map(d=>d.traffic_mb), backgroundColor:'rgba(13,110,253,0.5)' },
+        { type:'line', label:'Threat events', yAxisID:'y1',
+          data: daily.map(d=>d.threats), borderColor:'#dc3545',
+          backgroundColor:'#dc3545', tension:0.3 }
+      ] },
+    options: { scales:{
+      y:{ position:'left', title:{display:true,text:'MB'} },
+      y1:{ position:'right', title:{display:true,text:'Threats'}, grid:{drawOnChartArea:false} }
+    } }
+  });
+
+  $(function(){ $('#dev-events').DataTable({ pageLength: 10, order: [] }); });
+</script>
+{% endif %}
+{% endblock %}

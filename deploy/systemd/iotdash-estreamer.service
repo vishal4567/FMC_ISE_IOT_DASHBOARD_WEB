@@ -1,0 +1,19 @@
+[Unit]
+Description=IoT Security Dashboard - eStreamer ingester (eNcore -> DB)
+After=network-online.target postgresql.service iotdash-web.service
+Wants=network-online.target
+
+# Requires Cisco eNcore installed at /opt/eStreamer-eNcore and configured with
+# the FMC pkcs12 client cert (System > Integration > eStreamer > Create Client).
+[Service]
+Type=simple
+User=iotdash
+Group=iotdash
+WorkingDirectory=/opt/iotdash
+EnvironmentFile=/opt/iotdash/.env.prod
+ExecStart=/bin/bash -lc '/opt/eStreamer-eNcore/encore.sh foreground | /opt/iotdash/.venv/bin/python manage.py estreamer_ingest --source stdin'
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

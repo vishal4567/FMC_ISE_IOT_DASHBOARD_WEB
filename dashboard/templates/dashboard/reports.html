@@ -1,0 +1,34 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Reports{% endblock %}
+
+{% block content %}
+<h3 class="mb-3">Reports</h3>
+
+<ul class="nav nav-tabs mb-3" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#ise-tab"
+            type="button" role="tab">
+      <span class="badge bg-info me-1">ISE</span> Identity &amp; Asset ({{ ise_cards|length }})
+    </button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#fmc-tab"
+            type="button" role="tab">
+      <span class="badge bg-warning text-dark me-1">FMC</span> Firewall, Policy &amp; Events ({{ fmc_cards|length }})
+    </button>
+  </li>
+</ul>
+
+<div class="tab-content">
+  <div class="tab-pane fade show active" id="ise-tab" role="tabpanel">
+    <div class="row g-3">
+      {% for c in ise_cards %}{% include "dashboard/_card.html" with c=c %}{% endfor %}
+    </div>
+  </div>
+  <div class="tab-pane fade" id="fmc-tab" role="tabpanel">
+    <div class="row g-3">
+      {% for c in fmc_cards %}{% include "dashboard/_card.html" with c=c %}{% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

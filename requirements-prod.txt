@@ -1,0 +1,9 @@
+# Production dependencies (POC deps + the ingest/store/serve stack).
+-r requirements.txt
+
+gunicorn>=21.2          # WSGI app server
+psycopg[binary]>=3.1    # PostgreSQL driver
+redis>=5.0              # cache + Celery broker/result client
+celery>=5.3             # background workers + beat
+whitenoise>=6.6         # static file serving behind gunicorn
+waitress>=3.0; platform_system == "Windows"   # Windows WSGI server (gunicorn is Unix-only)

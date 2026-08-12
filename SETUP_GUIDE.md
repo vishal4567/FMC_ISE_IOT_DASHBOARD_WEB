@@ -1,0 +1,276 @@
+# Production Setup Guide — IoT Security Dashboard (ISE + FMC) on RHEL 9.8
+
+A single end-to-end runbook: from a blank RHEL 9.8 VM to a running dashboard
+ingesting live FMC events and correlating them to ISE identity.
+
+Follow the steps **in order**. Each phase ends with a ✅ **verify** step — don't
+move on until it passes. Companion docs are referenced where they go deeper:
+[PREREQUISITES.md](PREREQUISITES.md) · [DEPLOY_RHEL9.md](DEPLOY_RHEL9.md) ·
+[ESTREAMER_SETUP.md](ESTREAMER_SETUP.md) · [docs/DEPLOYMENT_VM_SPEC.md](docs/DEPLOYMENT_VM_SPEC.md).
+
+---
+
+## Architecture (what you're building)
+```
+                    ┌──────────── RHEL 9.8 host(s) ────────────┐
+ Cisco ISE  ──REST(443)──►  poll_ise_inventory ─► IoTDevice ┐  │
+ Cisco FMC  ──REST(443)──►  config datasets                 │  │
+ Cisco FMC  ──eStreamer(8302)──► eNcore ──JSON──► ingester ─┴─► PostgreSQL ─► Django/gunicorn ─► nginx ─► users
+                                                              Redis (cache+broker) · Celery worker+beat
+```
+- **ISE/FMC config + identity**: REST APIs, polled on a schedule.
+- **FMC events**: eStreamer → eNcore → `estreamer_ingest` → DB (stamped with ISE identity).
+- Dashboard reads from the DB only. No synthetic data.
+
+---
+
+## Phase 0 — Before you start: gather these
+
+| Item | Where from | Notes |
+|---|---|---|
+| VM(s) sized per environment | [docs/DEPLOYMENT_VM_SPEC.md](docs/DEPLOYMENT_VM_SPEC.md) | UAT: 1 VM (8 vCPU/16 GB/250 GB). Prod: tiered. |
+| RHEL 9.8 + valid subscription | your platform | `subscription-manager` registered |
+| ISE host + **ERS** read-only account | ISE admin | ERS enabled; note the ERS port (443 or 9060) |
+| FMC host + **REST** read-only account | FMC admin | REST API enabled |
+| FMC **eStreamer client cert** (`client.pkcs12`) + password | FMC → System → Integration → eStreamer | created against the eNcore host's IP |
+| DNS name + **TLS cert** for the dashboard | your PKI | for nginx 443 |
+| Firewall rules | network team | host → ISE:443, FMC:443, FMC:8302 |
+| Strong secrets | you | Django `SECRET_KEY`, Postgres password |
+
+Full detail: [PREREQUISITES.md](PREREQUISITES.md).
+
+✅ **Verify:** you can `ping`/`nc -vz <ise-host> 443`, `<fmc-host> 443`, and
+`<fmc-host> 8302` from the VM.
+
+---
+
+## Phase 1 — Prepare the RHEL 9.8 VM
+
+```bash
+sudo subscription-manager status          # must be registered
+sudo dnf -y update
+sudo hostnamectl set-hostname iotdash-prod
+sudo timedatectl set-ntp true             # correct time = correct event correlation
+timedatectl                               # confirm NTP synchronized
+sudo dnf -y install git nc                # helpers
+```
+Keep **SELinux enforcing** and **firewalld enabled** (the installer configures both).
+
+✅ **Verify:** `getenforce` → `Enforcing`; `timedatectl` → `System clock synchronized: yes`.
+
+---
+
+## Phase 2 — Cisco-side configuration
+
+### ISE
+1. **Administration → System → Settings → API Settings** → enable **ERS (Read/Write)**.
+2. Create/confirm a read-only account with the **ERS Operator** role.
+3. Note the ERS port: try **443** first (many deployments serve ERS there); **9060** otherwise.
+
+### FMC — REST API
+1. **System → Configuration → REST API Preferences** → **Enable REST API**.
+2. Create a read-only FMC user for the app.
+
+### FMC — eStreamer (events)
+1. **System → Integration → eStreamer** → tick **Intrusion, Connection, File,
+   Malware, Security Intelligence** → **Save**.
+2. **Create Client** → enter the **RHEL host's IP/hostname** → set a **password** →
+   **Save** → **download `client.pkcs12`**.
+
+✅ **Verify:** you hold `client.pkcs12` + its password, and both service accounts
+can log in to their web UIs.
+
+---
+
+## Phase 3 — Place the code + configure
+
+```bash
+sudo mkdir -p /opt/iotdash && sudo chown "$USER" /opt/iotdash
+# copy this folder's contents into /opt/iotdash  (git clone / rsync / scp)
+cd /opt/iotdash
+cp .env.prod.example .env.prod
+```
+
+Edit **`/opt/iotdash/.env.prod`**:
+```ini
+DJANGO_DEBUG=False
+DJANGO_SECRET_KEY=<64+ random chars>
+DJANGO_ALLOWED_HOSTS=dashboard.example.com
+DJANGO_CSRF_TRUSTED_ORIGINS=https://dashboard.example.com
+
+POSTGRES_HOST=localhost
+POSTGRES_DB=iotdash
+POSTGRES_USER=iotdash
+POSTGRES_PASSWORD=<strong>
+REDIS_URL=redis://localhost:6379/0
+
+ISE_HOST=<ise-host>
+ISE_USERNAME=<ers-user>
+ISE_PASSWORD=<ers-pass>
+ISE_ERS_PORT=443            # or 9060
+ISE_VERIFY_TLS=True
+
+FMC_HOST=<fmc-host>
+FMC_USERNAME=<fmc-user>
+FMC_PASSWORD=<fmc-pass>
+FMC_VERIFY_TLS=True
+
+RETENTION_THREAT_DAYS=90
+RETENTION_CONNECTION_DAYS=14
+```
+> `.env.prod` holds secrets — it's git-ignored; keep it `chmod 600`, owned by the
+> app user.
+
+✅ **Verify:** `.env.prod` has real values (no placeholders) and `HOST`s are
+hostname/IP only (no `https://`, no port).
+
+---
+
+## Phase 4 — Install (one script)
+
+```bash
+cd /opt/iotdash
+POSTGRES_PASSWORD='<strong>' sudo -E bash deploy/install_rhel9.sh
+```
+This installs Python 3.11 / PostgreSQL / Redis / nginx, creates the DB + app
+user (`iotdash`) + virtualenv, installs `requirements-prod.txt`, runs `migrate`
+and `collectstatic`, sets SELinux `httpd_can_network_connect`, opens firewalld
+HTTP/HTTPS, and enables the **web / worker / beat** systemd services.
+
+✅ **Verify:**
+```bash
+systemctl is-active iotdash-web iotdash-worker iotdash-beat postgresql redis nginx
+curl -sI http://localhost/ | head -1        # HTTP 200 (or 302)
+```
+
+---
+
+## Phase 5 — Validate the Cisco APIs
+
+Confirm the app can actually read ISE/FMC before relying on it:
+```bash
+cd /opt/iotdash
+sudo -u iotdash bash -c 'set -a; source .env.prod; set +a; .venv/bin/python manage.py probe_apis --out api_responses.json'
+```
+Review the summary (all `OK`) and skim `api_responses.json`. If ISE times out,
+switch `ISE_ERS_PORT` (443 ↔ 9060) and re-run. **If anything errors or a field
+looks unexpected, send `api_responses.json` back for parser tuning.**
+
+✅ **Verify:** `probe_apis` shows `OK` for ISE endpoints/groups and FMC auth/devices.
+
+---
+
+## Phase 6 — Seed ISE inventory
+
+Populate `IoTDevice` so events can be correlated + typed (also runs every 15 min via beat):
+```bash
+sudo -u iotdash bash -c 'set -a; source .env.prod; set +a; .venv/bin/python -c "import django,os;os.environ[\"DJANGO_SETTINGS_MODULE\"]=\"config.settings\";django.setup();from dashboard.tasks import poll_ise_inventory;print(poll_ise_inventory())"'
+```
+✅ **Verify:** it prints `{'ise_devices': <N>}` with N > 0.
+
+---
+
+## Phase 7 — eStreamer events (eNcore)
+
+Follow [ESTREAMER_SETUP.md](ESTREAMER_SETUP.md). Summary:
+1. Install eNcore to `/opt/eStreamer-eNcore`, drop in `client.pkcs12`.
+2. Configure `estreamer.conf`: FMC server + port **8302**, `pkcs12Filepath`,
+   subscriptions, and a **`json` → `stdout`** outputter.
+3. Test the handshake: `cd /opt/eStreamer-eNcore && ./encore.sh test`.
+4. **Grab a raw sample first** (no DB writes) so parsers can be verified:
+   ```bash
+   ./encore.sh foreground | /opt/iotdash/.venv/bin/python /opt/iotdash/manage.py \
+       estreamer_ingest --capture /tmp/encore-sample.jsonl --capture-only
+   ```
+   Send `/tmp/encore-sample.jsonl` back if the fields need mapping tweaks.
+5. Start the ingester service:
+   ```bash
+   sudo systemctl enable --now iotdash-estreamer
+   journalctl -u iotdash-estreamer -f       # watch "Ingested N events"
+   ```
+
+✅ **Verify:** event count grows:
+```bash
+sudo -u iotdash bash -c 'set -a; source .env.prod; set +a; .venv/bin/python -c "import django,os;os.environ[\"DJANGO_SETTINGS_MODULE\"]=\"config.settings\";django.setup();from dashboard.models import SecurityEvent;print(SecurityEvent.objects.count())"'
+```
+
+---
+
+## Phase 8 — TLS + hardening
+
+1. Put your cert/key in `/etc/pki/tls/certs/iotdash.crt` and `/etc/pki/tls/private/iotdash.key`.
+2. Uncomment the **443 server block** in `/etc/nginx/conf.d/iotdash.conf`, redirect 80→443, `sudo systemctl restart nginx`.
+3. Confirm `.env.prod`: `DJANGO_DEBUG=False`, real `DJANGO_ALLOWED_HOSTS` +
+   `DJANGO_CSRF_TRUSTED_ORIGINS`, `*_VERIFY_TLS=True`.
+4. `sudo chmod 600 /opt/iotdash/.env.prod`.
+
+✅ **Verify:** `https://dashboard.example.com/` loads over TLS; HTTP redirects to HTTPS.
+
+---
+
+## Phase 9 — Final acceptance
+
+Open the dashboard and confirm:
+- **W1 Total IoT Devices** > 0 (ISE inventory).
+- **W2/W4/W5** populate as events flow in; charts render.
+- **ISE ↔ FMC Mapping** shows Matched vs FMC-only.
+- **Device search** (navbar) opens a device's **360** view.
+- Click a **device-type** tile → the per-type dashboard loads.
+
+✅ **Done.**
+
+---
+
+## Operations
+
+```bash
+# service control
+sudo systemctl restart iotdash-web iotdash-worker iotdash-beat iotdash-estreamer
+systemctl status iotdash-*                      # health
+journalctl -u iotdash-estreamer -f              # live ingest
+journalctl -u iotdash-web -n 100                # web errors
+
+# scheduled jobs (Celery beat; intervals via .env.prod)
+POLL_ISE_MINUTES=15  POLL_CONFIG_MINUTES=15  ROLLUP_MINUTES=60  PURGE_MINUTES=720
+
+# run a job on demand
+sudo -u iotdash .venv/bin/celery -A config call dashboard.tasks.rollup_hourly
+```
+
+- **Backups:** nightly `pg_dump` (or PITR via WAL archiving) of the `iotdash` DB.
+- **Retention:** the purge task drops raw connection events after
+  `RETENTION_CONNECTION_DAYS` and threat events after `RETENTION_THREAT_DAYS`;
+  `HourlyAggregate` is kept.
+- **Upgrades:** pull new code → `pip install -r requirements-prod.txt` →
+  `manage.py migrate` → `manage.py collectstatic` → restart services.
+- **Scaling:** more gunicorn workers, worker replicas, a PG read replica, or
+  Kafka in front of the ingester — see the VM spec's scaling triggers.
+
+---
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| Dashboard 500 / won't start | DB unreachable / migrations | `systemctl status postgresql`; `manage.py migrate`; check `.env.prod` DB creds |
+| W1 = 0, no devices | ISE poll failing | run `probe_apis`; check `ISE_ERS_PORT` (443↔9060), ERS role, firewall |
+| `probe_apis` ISE timeout | wrong ERS port / blocked | flip `ISE_ERS_PORT`; open host→ISE:443/9060 |
+| FMC auth 401/429 | bad creds / token limit | verify account; avoid many clients on one FMC user; wait a minute |
+| No events arriving | eNcore not connected | `./encore.sh test`; check host→FMC:8302; cert host must match; `journalctl -u iotdash-estreamer` |
+| Events stored but device_type blank | device not in ISE (FMC-only) | expected — it's a shadow device; runs ISE poll to enrich enrolled ones |
+| Fields parsed wrong | eNcore JSON schema differs | capture with `estreamer_ingest --capture … --capture-only`, send sample, tune `dashboard/estreamer/mapping.py` |
+| nginx 502 | gunicorn down / SELinux | `systemctl status iotdash-web`; `setsebool -P httpd_can_network_connect 1` |
+| Static/CSS missing | collectstatic not run | `manage.py collectstatic --noinput`; restart web |
+
+---
+
+## Quick reference — ports & accounts
+| From | To | Port | Purpose |
+|---|---|---|---|
+| App host | ISE | 443 (or 9060) | ERS + MnT |
+| App host | FMC | 443 | REST config |
+| eNcore host | FMC | 8302 | eStreamer events |
+| Users | nginx | 443 | Dashboard (TLS) |
+
+Accounts/certs: ISE ERS (read-only) · FMC REST (read-only) · FMC eStreamer
+**pkcs12** client cert · dashboard **TLS** cert.

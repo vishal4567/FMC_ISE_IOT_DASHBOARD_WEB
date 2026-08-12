@@ -1,0 +1,17 @@
+[Unit]
+Description=IoT Security Dashboard - Celery worker
+After=network-online.target redis.service postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=iotdash
+Group=iotdash
+WorkingDirectory=/opt/iotdash
+EnvironmentFile=/opt/iotdash/.env.prod
+ExecStart=/opt/iotdash/.venv/bin/celery -A config worker -l info --concurrency 4
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

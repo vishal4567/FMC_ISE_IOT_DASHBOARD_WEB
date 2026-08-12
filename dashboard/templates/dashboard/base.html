@@ -1,0 +1,52 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}IoT Security Dashboard{% endblock %} · ISE + FMC</title>
+  <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet"
+        href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
+  <link rel="stylesheet" href="{% static 'dashboard/app.css' %}">
+</head>
+<body>
+  <nav class="navbar navbar-expand navbar-dark bg-dark px-3">
+    <a class="navbar-brand" href="{% url 'dashboard:index' %}">
+      🛡️ IoT Security Dashboard
+    </a>
+    <ul class="navbar-nav me-auto">
+      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:index' %}">Dashboard</a></li>
+      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:mapping' %}">ISE ↔ FMC Mapping</a></li>
+      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:reports' %}">Reports</a></li>
+      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:readiness' %}">Policy Readiness</a></li>
+    </ul>
+    <form class="d-flex" role="search" action="{% url 'dashboard:device_search' %}" method="get">
+      <input class="form-control form-control-sm" type="search" name="q"
+             list="nav-device-options" autocomplete="off"
+             placeholder="🔍 Device MAC / IP / hostname → 360"
+             style="min-width:270px" value="{{ request.GET.q }}">
+      <button class="btn btn-sm btn-outline-light ms-1" type="submit">Search</button>
+    </form>
+    <datalist id="nav-device-options">
+      {% for o in nav_device_options %}<option value="{{ o }}">{% endfor %}
+    </datalist>
+  </nav>
+
+  <div class="container-fluid py-4">
+    {% block content %}{% endblock %}
+  </div>
+
+  <footer class="text-center text-muted small py-4">
+    Cisco ISE + FMC integration. ISE/FMC configuration via REST APIs; FMC events
+    via eStreamer (eNcore) ingestion.
+  </footer>
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

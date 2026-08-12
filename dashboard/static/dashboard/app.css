@@ -1,0 +1,42 @@
+body {
+  background: #f4f6f9;
+}
+
+.status-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.card .display-6 {
+  font-weight: 600;
+}
+
+.navbar-brand {
+  font-weight: 600;
+}
+
+table#data-table td {
+  font-size: 0.85rem;
+  word-break: break-word;
+  max-width: 320px;
+}
+
+.breadcrumb {
+  background: transparent;
+  padding-left: 0;
+}
+
+.card.widget {
+  transition: transform 0.08s ease, box-shadow 0.08s ease;
+}
+.card.widget:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.12) !important;
+}
+
+.navbar-nav .nav-link {
+  padding-left: 0.8rem;
+  padding-right: 0.8rem;
+}

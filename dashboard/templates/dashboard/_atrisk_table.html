@@ -1,0 +1,26 @@
+<div class="table-responsive">
+  <table class="table table-sm table-hover align-middle mb-0">
+    <thead class="table-light"><tr>
+      <th>MAC</th><th>Type</th><th>Site</th><th>Severity</th>
+      <th class="text-end">Events</th><th>ISE?</th>
+    </tr></thead>
+    <tbody>
+      {% for d in rows %}
+      <tr>
+        <td><a href="{% url 'dashboard:device' d.device_mac %}"><code>{{ d.device_mac }}</code></a></td>
+        <td>{{ d.device_type }}</td>
+        <td>{{ d.site }}</td>
+        <td><span class="badge
+          {% if d.highest_severity == 'Critical' %}bg-danger
+          {% elif d.highest_severity == 'High' %}bg-warning text-dark
+          {% elif d.highest_severity == 'Medium' %}bg-info text-dark
+          {% else %}bg-secondary{% endif %}">{{ d.highest_severity }}</span></td>
+        <td class="text-end fw-bold">{{ d.event_count }}</td>
+        <td>{% if d.ise_correlated == 'Yes' %}<span class="text-success">✔</span>{% elif d.ise_correlated == 'Mapped' %}<span class="text-primary">↔</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6" class="text-center text-muted">No devices at risk for the current selection.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>

@@ -1,0 +1,88 @@
+{% extends "dashboard/base.html" %}
+{% load dashboard_extras %}
+{% block title %}ISE ↔ FMC Mapping{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard:index' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active">ISE ↔ FMC Mapping</li>
+  </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-start flex-wrap mb-2">
+  <div>
+    <h3 class="mb-1">ISE ↔ FMC Device Mapping</h3>
+  </div>
+  <a href="?refresh=1" class="btn btn-sm btn-outline-primary">↻ Refresh</a>
+</div>
+
+<div class="alert alert-info small" style="max-width:1000px">
+  <strong>How to read this:</strong> every device seen in the FMC event feed is
+  correlated to the Cisco ISE endpoint inventory <strong>by MAC</strong>.
+  <span class="badge bg-success">Matched</span> = the device is enrolled in ISE
+  (its identity group &amp; profile are shown).
+  <span class="badge bg-secondary">Unmatched (FMC-only)</span> = seen by FMC but
+  <em>not</em> in ISE — a shadow / unmanaged device worth investigating.
+</div>
+
+<!-- Summary -->
+<div class="row g-3 my-2">
+  <div class="col"><div class="card shadow-sm text-center"><div class="card-body">
+    <div class="display-6 fw-bold">{{ summary.total }}</div>
+    <div class="small text-muted">FMC devices</div></div></div></div>
+  <div class="col"><div class="card shadow-sm text-center"><div class="card-body">
+    <div class="display-6 fw-bold text-success">{{ summary.matched }}</div>
+    <div class="small text-muted">Matched to ISE</div></div></div></div>
+  <div class="col"><div class="card shadow-sm text-center"><div class="card-body">
+    <div class="display-6 fw-bold text-secondary">{{ summary.unmatched }}</div>
+    <div class="small text-muted">FMC-only (not in ISE)</div></div></div></div>
+  <div class="col"><div class="card shadow-sm text-center"><div class="card-body">
+    <div class="display-6 fw-bold text-success">{{ summary.match_rate }}%</div>
+    <div class="small text-muted">Correlated</div></div></div></div>
+</div>
+
+<div class="table-responsive">
+  <table id="map-table" class="table table-sm table-hover align-middle w-100">
+    <thead class="table-dark">
+      <tr>
+        <th>FMC MAC</th><th>FMC IP</th><th>Device type</th><th>Hostname</th><th class="text-end">Events</th>
+        <th class="text-center">Correlation</th>
+        <th>ISE MAC</th><th>ISE identity group</th><th>ISE profile</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr class="{% if r.correlation == 'Matched' %}table-success{% else %}table-light{% endif %}">
+        <td><a href="{% url 'dashboard:device' r.fmc_mac %}"><code>{{ r.fmc_mac }}</code></a></td>
+        <td>{{ r.fmc_ip }}</td>
+        <td>{{ r.device_type }}</td>
+        <td>{{ r.fmc_hostname }}</td>
+        <td class="text-end">{{ r.fmc_events }}</td>
+        <td class="text-center">
+          {% if r.correlation == 'Matched' %}
+            <span class="badge bg-success">Matched</span>
+          {% else %}
+            <span class="badge bg-secondary">FMC-only</span>
+          {% endif %}
+        </td>
+        <td>{% if r.ise_endpoint_mac %}<code>{{ r.ise_endpoint_mac }}</code>{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td>{{ r.ise_identity_group|default:"—" }}</td>
+        <td>{{ r.ise_profile|default:"—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  $(function () {
+    $('#map-table').DataTable({
+      pageLength: 25, order: [],
+      language: { search: "Search (MAC / IP / type):" }
+    });
+  });
+</script>
+{% endblock %}

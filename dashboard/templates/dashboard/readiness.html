@@ -1,0 +1,98 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Policy Readiness{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard:index' %}">Overview</a></li>
+    <li class="breadcrumb-item active">Policy Readiness</li>
+  </ol>
+</nav>
+
+<div class="d-flex justify-content-between align-items-start flex-wrap mb-2">
+  <div>
+    <h3 class="mb-1">Use-case Policy Readiness</h3>
+    <div class="text-muted" style="max-width:820px">
+      Most requirement use cases are <strong>event-driven</strong>. The FMC
+      <em>config</em> REST API does not carry intrusion / malware / connection
+      events — those need an event stream (eStreamer / SAL). This map answers the
+      prerequisite instead: <strong>are the controls that would generate or
+      enforce each use case actually configured?</strong>
+    </div>
+  </div>
+  <a href="?refresh=1" class="btn btn-sm btn-outline-primary">↻ Refresh</a>
+</div>
+
+<!-- Legend -->
+<div class="mb-4 small">
+  <span class="badge bg-success">Available now</span>
+  <span class="badge bg-warning text-dark">Controls ready · events pending</span>
+  <span class="badge bg-info text-dark">Needs write access / event stream</span>
+  <span class="badge bg-danger">Not configured</span>
+</div>
+
+{% for category, rows in categories.items %}
+<h5 class="text-uppercase text-muted small fw-bold mb-2">{{ category }}</h5>
+<div class="table-responsive mb-4">
+  <table class="table table-sm align-middle bg-white shadow-sm">
+    <thead class="table-light">
+      <tr>
+        <th style="width:22%">Use case</th>
+        <th style="width:8%">Source</th>
+        <th style="width:26%">Controls looked at</th>
+        <th style="width:8%" class="text-center">Configured</th>
+        <th style="width:18%">Status</th>
+        <th>Notes / next step</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td class="fw-semibold">{{ r.use_case }}</td>
+        <td><span class="badge bg-secondary">{{ r.source }}</span></td>
+        <td class="small">
+          {{ r.controls }}
+          {% if r.links %}
+          <div class="mt-1">
+            {% for key, label in r.links %}
+            <a class="badge bg-light text-primary text-decoration-none border"
+               href="{% url 'dashboard:dataset' key %}">{{ label }}</a>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </td>
+        <td class="text-center fw-bold">{{ r.count }}</td>
+        <td>
+          <span class="badge
+            {% if r.status == 'available' %}bg-success
+            {% elif r.status == 'controls-ready' %}bg-warning text-dark
+            {% elif r.status == 'action-needed' %}bg-info text-dark
+            {% else %}bg-danger{% endif %}">
+            {{ r.status_label }}
+          </span>
+        </td>
+        <td class="small text-muted">{{ r.note }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+
+<div class="alert alert-light border small">
+  <strong>To light up the amber / blue rows:</strong> add an FMC event source
+  (eStreamer + eNcore collector, or Security Analytics &amp; Logging) so live
+  events land in the app's database, and use a write-capable ISE account for
+  quarantine/ANC actions. The controls above confirm the enforcement side is in
+  place; only the event feed is missing.
+</div>
+<div class="alert alert-info small">
+  <strong>Preview the event-driven widgets:</strong> the
+  <a href="{% url 'dashboard:index' %}" class="alert-link">Dashboard</a>
+  (Widgets 2, 4, 5) and the
+  <a href="{% url 'dashboard:mapping' %}" class="alert-link">ISE ↔ FMC Mapping</a>
+  window use a representative sample event feed grounded in this environment's
+  real MACs, zones, rules and policies — a stand-in until a real event feed
+  (eStreamer / SAL) is connected.
+</div>
+{% endblock %}

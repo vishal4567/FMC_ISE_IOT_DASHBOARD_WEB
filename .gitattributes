@@ -1,0 +1,8 @@
+# Target is RHEL/Linux: force LF so shell scripts & systemd units work there.
+* text=auto eol=lf
+*.sh text eol=lf
+*.service text eol=lf
+*.conf text eol=lf
+*.png binary
+*.jpg binary
+*.ico binary

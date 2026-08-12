@@ -1,0 +1,33 @@
+# Environment / secrets
+.env
+.env.prod
+
+# Diagnostic / capture artifacts (may contain real MACs/IPs)
+api_responses.json
+events.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Django
+db.sqlite3
+*.log
+staticfiles/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Certificates / capture files (never commit)
+*.pkcs12
+*.pem
+*.key
+*.jsonl
+encore-sample*

@@ -1,0 +1,24 @@
+<div class="col-md-6 col-xl-4">
+  <div class="card h-100 shadow-sm">
+    <div class="card-body d-flex flex-column">
+      <div class="d-flex justify-content-between align-items-start">
+        <h6 class="card-title mb-1">{{ c.label }}</h6>
+        <span class="badge {% if c.source == 'ISE' %}bg-info{% elif c.source == 'MAP' %}bg-primary{% else %}bg-warning text-dark{% endif %}">
+          {{ c.source }}
+        </span>
+      </div>
+      <div class="small text-muted mb-2">{{ c.widget }}</div>
+      {% if c.error %}
+        <div class="display-6 text-danger">—</div>
+        <div class="small text-danger flex-grow-1">{{ c.error|truncatechars:140 }}</div>
+      {% else %}
+        <div class="display-6">{{ c.count }}</div>
+        <div class="small text-muted flex-grow-1">{{ c.description }}</div>
+      {% endif %}
+      <a href="{% url 'dashboard:dataset' c.key %}"
+         class="btn btn-sm btn-outline-secondary mt-2 align-self-start">
+        View report →
+      </a>
+    </div>
+  </div>
+</div>

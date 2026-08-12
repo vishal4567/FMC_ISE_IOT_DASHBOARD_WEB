@@ -1,0 +1,275 @@
+{% extends "dashboard/base.html" %}
+{% load dashboard_extras %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+
+<!-- ===== Global filter bar (Site + Time) - applies to BOTH dashboards ===== -->
+<form method="get" class="card shadow-sm mb-3">
+  <div class="card-body py-2 d-flex flex-wrap align-items-center gap-2">
+    <span class="fw-semibold me-1">🌐 Filters</span>
+    <label class="small text-muted">Site</label>
+    <select name="site" class="form-select form-select-sm w-auto">
+      <option value="All" {% if filters.site == 'All' %}selected{% endif %}>All sites</option>
+      {% for s in filters.sites %}
+      <option value="{{ s }}" {% if filters.site == s %}selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+    <label class="small text-muted ms-2">Time</label>
+    <select name="range" class="form-select form-select-sm w-auto">
+      <option value="1h"  {% if filters.range == '1h' %}selected{% endif %}>Last 1 hour</option>
+      <option value="24h" {% if filters.range == '24h' %}selected{% endif %}>Last 24 hours</option>
+      <option value="7d"  {% if filters.range == '7d' %}selected{% endif %}>Last 7 days</option>
+    </select>
+    {% if selected_type %}<input type="hidden" name="type" value="{{ selected_type }}">{% endif %}
+    <button class="btn btn-sm btn-primary ms-1" type="submit">Apply</button>
+    <a class="btn btn-sm btn-outline-secondary" href="{% url 'dashboard:index' %}">Clear</a>
+    <a class="btn btn-sm btn-outline-secondary ms-auto" href="?site={{ filters.site|urlencode }}&range={{ filters.range }}{% if selected_type %}&type={{ selected_type|urlencode }}{% endif %}&refresh=1">↻ Refresh</a>
+  </div>
+</form>
+
+<!-- =======================================================================
+     DASHBOARD 1 · ALL DEVICES  (independent of device-type selection)
+     ======================================================================= -->
+<div class="d-flex align-items-center mb-2">
+  <h4 class="mb-0">Overview — All IoT Devices</h4>
+  <span class="badge bg-secondary ms-2">{{ filters.site }} · {{ filters.range }}</span>
+</div>
+
+<div class="row g-3 mb-2">
+  <div class="col-6 col-lg">
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}">
+      <div class="card widget shadow-sm h-100"><div class="card-body text-center">
+        <div class="text-muted small text-uppercase">W1 · Total IoT Devices</div>
+        <div class="display-5 fw-bold text-primary">{{ widgets.total_devices }}</div>
+        <div class="small text-muted">Onboarded in ISE</div>
+      </div></div>
+    </a>
+  </div>
+  <div class="col-6 col-lg">
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}">
+      <div class="card widget shadow-sm h-100"><div class="card-body text-center">
+        <div class="text-muted small text-uppercase">W2 · Devices at Risk</div>
+        <div class="display-5 fw-bold text-danger">{{ widgets.at_risk }}</div>
+        <div class="small text-muted">With threat events · {{ filters.range }}</div>
+      </div></div>
+    </a>
+  </div>
+  <div class="col-6 col-lg">
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-unauthorized' %}">
+      <div class="card widget shadow-sm h-100"><div class="card-body text-center">
+        <div class="text-muted small text-uppercase">W3 · Quarantined / Blocked</div>
+        <div class="display-5 fw-bold text-warning">{{ widgets.quarantined }}</div>
+        <div class="small text-muted">ISE blocked / unidentified</div>
+      </div></div>
+    </a>
+  </div>
+  <div class="col-6 col-lg">
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}">
+      <div class="card widget shadow-sm h-100"><div class="card-body text-center">
+        <div class="text-muted small text-uppercase">W4 · Threat Events ({{ filters.range }})</div>
+        <div class="display-5 fw-bold">{{ widgets.threats_window }}</div>
+        <div class="small text-muted">Traffic &amp; threat trend ↓</div>
+      </div></div>
+    </a>
+  </div>
+  <div class="col-6 col-lg">
+    <div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="text-muted small text-uppercase">W5 · Critical Attacks</div>
+      <div class="display-5 fw-bold text-danger">{{ widgets.critical }}</div>
+      <div class="small text-muted">Highest severity · {{ filters.range }}</div>
+    </div></div>
+  </div>
+</div>
+<div class="small text-muted mb-4">
+  W1 &amp; W3 are total ISE inventory (not split by site — ISE profiling is not
+  available in this environment). W2/W4/W5 &amp; charts respect Site + Time.
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100"><div class="card-body">
+      <h6 class="card-title">Attack Severity <span class="text-muted small">(Widget 5 · {{ filters.range }})</span></h6>
+      <canvas id="sevAll" height="220"></canvas>
+    </div></div>
+  </div>
+  <div class="col-lg-8">
+    <div class="card shadow-sm h-100"><div class="card-body">
+      <h6 class="card-title">Traffic &amp; Threat Trend — {{ filters.range }}
+        <span class="text-muted small">(Widget 4 · per {{ filters.granularity }})</span></h6>
+      <canvas id="trendAll" height="90"></canvas>
+    </div></div>
+  </div>
+</div>
+
+<!-- By Device Type — ranking table (analysis; the selector cards sit lower) -->
+<h5 class="text-uppercase text-muted small fw-bold mb-2">By Device Type
+  <span class="text-muted">— ranking by alerts &amp; traffic</span></h5>
+<div class="card shadow-sm mb-4"><div class="card-body">
+  <div class="table-responsive">
+    <table id="type-table" class="table table-sm table-hover align-middle w-100 mb-0">
+      <thead class="table-dark"><tr>
+        <th>Device type</th><th class="text-end">Devices</th><th class="text-end">Events</th>
+        <th class="text-end">Threats</th><th class="text-end">Critical</th>
+        <th class="text-end">Traffic (MB)</th><th class="text-end">% Blocked</th>
+      </tr></thead>
+      <tbody>
+        {% for t in leaderboard %}
+        <tr class="{% if selected_type == t.device_type %}table-primary{% endif %}">
+          <td class="fw-semibold">{{ t.device_type }}</td>
+          <td class="text-end">{{ t.devices }}</td>
+          <td class="text-end">{{ t.events }}</td>
+          <td class="text-end fw-bold text-danger">{{ t.threats }}</td>
+          <td class="text-end">{{ t.critical }}</td>
+          <td class="text-end">{{ t.traffic_mb }}</td>
+          <td class="text-end">{{ t.pct_blocked }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div></div>
+
+<!-- Devices at risk + correlation (all devices) -->
+<div class="row g-3 mb-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm h-100"><div class="card-body">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <h6 class="card-title mb-0">Top IoT Devices at Risk <span class="text-muted small">(Widget 2 · all types)</span></h6>
+        <a href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}" class="btn btn-sm btn-outline-secondary">Full report</a>
+      </div>
+      {% include "dashboard/_atrisk_table.html" with rows=at_risk_top %}
+    </div></div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm h-100"><div class="card-body text-center">
+      <h6 class="card-title">ISE ↔ FMC Correlation</h6>
+      <div class="display-4 fw-bold text-success">{{ correlation.match_rate }}%</div>
+      <div class="small text-muted mb-3">of FMC devices enrolled in ISE</div>
+      <div class="d-flex justify-content-around">
+        <div><div class="h4 mb-0 text-success">{{ correlation.matched }}</div><div class="small text-muted">Matched</div></div>
+        <div><div class="h4 mb-0 text-secondary">{{ correlation.unmatched }}</div><div class="small text-muted">FMC-only</div></div>
+        <div><div class="h4 mb-0">{{ correlation.total }}</div><div class="small text-muted">Total</div></div>
+      </div>
+      <a href="{% url 'dashboard:mapping' %}" class="btn btn-sm btn-primary mt-3">Open mapping window →</a>
+    </div></div>
+  </div>
+</div>
+
+<!-- Selector: per-type cards sit immediately above the device-type dashboard -->
+<h5 class="text-uppercase text-muted small fw-bold mb-2">Select a Device Type
+  <span class="text-muted">— click a tile to load its dashboard below ↓</span></h5>
+<div class="row g-2 mb-2">
+  {% for t in leaderboard %}
+  <div class="col-6 col-md-4 col-xl-2">
+    <a class="text-decoration-none"
+       href="?site={{ filters.site|urlencode }}&range={{ filters.range }}&type={{ t.device_type|urlencode }}#type-dash">
+      <div class="card widget shadow-sm h-100 {% if selected_type == t.device_type %}border-primary border-3{% endif %}">
+        <div class="card-body p-2 text-center">
+          <div class="small fw-semibold text-truncate">{{ t.device_type }}</div>
+          <div class="h4 mb-0 text-danger">{{ t.threats }}</div>
+          <div class="small text-muted">threats</div>
+          <div class="small mt-1">{{ t.devices }} devices · {{ t.traffic_mb }} MB</div>
+          <div class="small text-muted">{{ t.critical }} critical · {{ t.pct_blocked }}% blocked</div>
+        </div>
+      </div>
+    </a>
+  </div>
+  {% endfor %}
+</div>
+
+<!-- =======================================================================
+     DASHBOARD 2 · DEVICE TYPE  (defaults to most threats; independent panel)
+     ======================================================================= -->
+<div id="type-dash" class="p-3 rounded" style="background:#eef2f7;">
+  <div class="d-flex flex-wrap align-items-center mb-3 gap-2">
+    <h4 class="mb-0">Device-Type Dashboard{% if selected_type %} — <span class="text-primary">{{ selected_type }}</span>{% endif %}</h4>
+    {% if selected_type %}
+    <span class="badge bg-secondary">{{ filters.site }} · {{ filters.range }}</span>
+    {% endif %}
+  </div>
+
+  {% if not selected_type %}
+    <div class="alert alert-secondary mb-0">No device-type data for the current filters.</div>
+  {% else %}
+  <!-- 6 event tiles -->
+  <div class="row g-3 mb-3">
+    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="text-muted small text-uppercase">Devices</div>
+      <div class="h2 mb-0 text-primary">{{ type_metrics.devices }}</div></div></div></div>
+    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="text-muted small text-uppercase">At Risk</div>
+      <div class="h2 mb-0 text-danger">{{ type_metrics.at_risk }}</div></div></div></div>
+    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="text-muted small text-uppercase">Threat Events</div>
+      <div class="h2 mb-0">{{ type_metrics.threats }}</div></div></div></div>
+    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="text-muted small text-uppercase">Critical</div>
+      <div class="h2 mb-0 text-danger">{{ type_metrics.critical }}</div></div></div></div>
+    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="text-muted small text-uppercase">Traffic (MB)</div>
+      <div class="h2 mb-0">{{ type_metrics.traffic_mb }}</div></div></div></div>
+    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="text-muted small text-uppercase">% Blocked</div>
+      <div class="h2 mb-0">{{ type_metrics.pct_blocked }}%</div></div></div></div>
+  </div>
+
+  <!-- type charts -->
+  <div class="row g-3 mb-3">
+    <div class="col-lg-4">
+      <div class="card shadow-sm h-100"><div class="card-body">
+        <h6 class="card-title">Attack Severity — {{ selected_type }}</h6>
+        <canvas id="sevType" height="220"></canvas>
+      </div></div>
+    </div>
+    <div class="col-lg-8">
+      <div class="card shadow-sm h-100"><div class="card-body">
+        <h6 class="card-title">Traffic &amp; Threat Trend — {{ selected_type }} ({{ filters.range }})</h6>
+        <canvas id="trendType" height="90"></canvas>
+      </div></div>
+    </div>
+  </div>
+
+  <!-- type top devices -->
+  <div class="card shadow-sm"><div class="card-body">
+    <h6 class="card-title">Top {{ selected_type }} devices at risk</h6>
+    {% include "dashboard/_atrisk_table.html" with rows=type_at_risk_top %}
+  </div></div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  const sevColors = {Critical:'#dc3545',High:'#fd7e14',Medium:'#0dcaf0',Low:'#6c757d',Informational:'#adb5bd'};
+  function donut(id, data){
+    const el = document.getElementById(id); if(!el) return;
+    new Chart(el, { type:'doughnut',
+      data:{ labels:data.map(s=>s.severity),
+        datasets:[{ data:data.map(s=>s.count), backgroundColor:data.map(s=>sevColors[s.severity]) }] },
+      options:{ plugins:{ legend:{ position:'bottom' } } } });
+  }
+  function trend(id, points){
+    const el = document.getElementById(id); if(!el) return;
+    new Chart(el, {
+      data:{ labels:points.map(p=>p.display),
+        datasets:[
+          { type:'bar', label:'Traffic (MB)', yAxisID:'y',
+            data:points.map(p=>p.traffic_mb), backgroundColor:'rgba(13,110,253,0.5)' },
+          { type:'line', label:'Threat events', yAxisID:'y1',
+            data:points.map(p=>p.threats), borderColor:'#dc3545', backgroundColor:'#dc3545', tension:0.3 }
+        ] },
+      options:{ scales:{
+        y:{ position:'left', title:{display:true,text:'MB'} },
+        y1:{ position:'right', title:{display:true,text:'Threats'}, grid:{drawOnChartArea:false} } } } });
+  }
+  donut('sevAll', {{ severity_json|safe }});
+  trend('trendAll', {{ trend_json|safe }});
+  {% if selected_type %}
+  donut('sevType', {{ type_severity_json|safe }});
+  trend('trendType', {{ type_trend_json|safe }});
+  {% endif %}
+  $(function(){ $('#type-table').DataTable({ paging:false, searching:false, info:false, order:[[3,'desc']] }); });
+</script>
+{% endblock %}

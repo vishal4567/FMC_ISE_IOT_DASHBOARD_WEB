@@ -1,0 +1,65 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Device Search{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ol class="breadcrumb">
+    <li class="breadcrumb-item"><a href="{% url 'dashboard:index' %}">Dashboard</a></li>
+    <li class="breadcrumb-item active">Device Search</li>
+  </ol>
+</nav>
+
+<h3 class="mb-1">Device Search</h3>
+<p class="text-muted">
+  {% if q %}
+    {{ matches|length }} device(s) matching “<strong>{{ q }}</strong>”.
+  {% else %}
+    Search a device by MAC, IP or hostname (or pick one below) to open its 360° view.
+    {{ total }} devices available.
+  {% endif %}
+</p>
+
+<form class="mb-3" method="get" action="{% url 'dashboard:device_search' %}">
+  <div class="input-group" style="max-width:520px">
+    <input class="form-control" type="search" name="q" value="{{ q }}"
+           list="nav-device-options" autocomplete="off"
+           placeholder="MAC / IP / hostname / device type">
+    <button class="btn btn-primary" type="submit">Search</button>
+  </div>
+</form>
+
+{% if q and not matches %}
+  <div class="alert alert-warning">No devices found for “{{ q }}”.</div>
+{% else %}
+<div class="table-responsive">
+  <table id="search-table" class="table table-sm table-hover align-middle w-100">
+    <thead class="table-dark"><tr>
+      <th>MAC</th><th>IP</th><th>Hostname</th><th>Device type</th><th>Site</th>
+      <th class="text-end">Events</th><th>ISE</th><th></th>
+    </tr></thead>
+    <tbody>
+      {% for d in matches %}
+      <tr>
+        <td><code>{{ d.mac }}</code></td>
+        <td>{{ d.ip }}</td>
+        <td>{{ d.hostname }}</td>
+        <td>{{ d.device_type }}</td>
+        <td>{{ d.site }}</td>
+        <td class="text-end fw-bold">{{ d.event_count }}</td>
+        <td>{% if d.in_ise %}<span class="text-success" title="Matched in ISE">✔</span>{% else %}<span class="text-primary" title="Manually mapped">↔</span>{% endif %}</td>
+        <td class="text-end">
+          <a class="btn btn-sm btn-outline-primary py-0" href="{% url 'dashboard:device' d.mac %}">Open 360 →</a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+  $(function(){ $('#search-table').DataTable({ pageLength: 25, order: [[5,'desc']] }); });
+</script>
+{% endblock %}

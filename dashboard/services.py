@@ -1,0 +1,687 @@
+﻿"""
+Orchestration layer between Django views and the raw ISE/FMC clients.
+
+Responsibilities
+----------------
+* Build configured clients from ``settings`` (lazily, so a missing config for
+  one source never breaks the other).
+* A **dataset registry**: every fetchable table is described once (label,
+  source, which client method produces its rows, and the widget it maps to).
+  A single generic view + CSV exporter are driven off this registry, so
+  adding a data source is a one-entry change.
+* Short-lived caching (Django cache) so repeated page loads and the CSV
+  export of the same table don't re-hit the sandbox.
+
+Nothing here filters for IoT or correlates ISE<->FMC - that is deliberately
+out of scope for this iteration (per the current requirement). Everything is
+fetched and shown as-is.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Callable
+
+from django.conf import settings
+from django.core.cache import cache
+
+from integrations.exceptions import ConfigError, IntegrationError
+from integrations.fmc_client import FMCClient
+from integrations.ise_client import ISEClient
+
+
+# --------------------------------------------------------------------------- #
+# Client factories
+#
+# Clients are memoised per-process and keyed by their effective config. A
+# single dashboard page fetches many datasets; without reuse each one would
+# re-authenticate, and FMC in particular limits concurrent API tokens and
+# request rate - so re-login-per-dataset silently trips those limits. Sharing
+# one authenticated client (FMC token TTL ~30 min) keeps a page load to a
+# single login per source. The client's own session/token handle expiry.
+# --------------------------------------------------------------------------- #
+_CLIENT_CACHE: dict = {}
+
+
+def _ise_cache_key(cfg):
+    return ("ise", cfg["HOST"], cfg["ERS_PORT"], cfg["USERNAME"], cfg["PASSWORD"])
+
+
+def _fmc_cache_key(cfg):
+    return ("fmc", cfg["HOST"], cfg["PORT"], cfg["USERNAME"], cfg["PASSWORD"])
+
+
+def get_ise_client() -> ISEClient:
+    cfg = settings.ISE
+    key = _ise_cache_key(cfg)
+    client = _CLIENT_CACHE.get(key)
+    if client is None:
+        client = ISEClient(
+            host=cfg["HOST"],
+            username=cfg["USERNAME"],
+            password=cfg["PASSWORD"],
+            ers_port=cfg["ERS_PORT"],
+            verify_tls=cfg["VERIFY_TLS"],
+            timeout=cfg["TIMEOUT"],
+            detail_limit=cfg["DETAIL_LIMIT"],
+            page_size=cfg["PAGE_SIZE"],
+            max_pages=cfg["MAX_PAGES"],
+        )
+        _CLIENT_CACHE[key] = client
+    return client
+
+
+def get_fmc_client() -> FMCClient:
+    cfg = settings.FMC
+    key = _fmc_cache_key(cfg)
+    client = _CLIENT_CACHE.get(key)
+    if client is None:
+        client = FMCClient(
+            host=cfg["HOST"],
+            username=cfg["USERNAME"],
+            password=cfg["PASSWORD"],
+            port=cfg["PORT"],
+            verify_tls=cfg["VERIFY_TLS"],
+            timeout=cfg["TIMEOUT"],
+            domain_uuid=cfg["DOMAIN_UUID"],
+            page_limit=cfg["PAGE_LIMIT"],
+            max_pages=cfg["MAX_PAGES"],
+        )
+        _CLIENT_CACHE[key] = client
+    return client
+
+
+# --------------------------------------------------------------------------- #
+# Dataset registry
+# --------------------------------------------------------------------------- #
+@dataclass(frozen=True)
+class Dataset:
+    key: str  # URL slug
+    label: str  # human title
+    source: str  # "ISE" or "FMC"
+    fetch: Callable[[], list]  # returns list[dict]
+    description: str = ""
+    widget: str = ""  # which requirement widget/use-case it feeds
+    columns: list = field(default_factory=list)  # optional explicit column order
+
+
+def _ise_endpoints():
+    return get_ise_client().get_endpoints(detail=True)
+
+
+def _ise_endpoint_groups():
+    return get_ise_client().get_endpoint_groups()
+
+
+def _ise_network_devices():
+    return get_ise_client().get_network_devices()
+
+
+def _ise_profiles():
+    return get_ise_client().get_profiler_profiles()
+
+
+def _ise_sessions():
+    return get_ise_client().get_active_sessions()
+
+
+def _ise_unauthorized():
+    return get_ise_client().get_unauthorized_endpoints()
+
+
+def _fmc_devices():
+    return get_fmc_client().get_devices()
+
+
+def _fmc_access_policies():
+    return get_fmc_client().get_access_policies()
+
+
+def _fmc_access_rules():
+    return get_fmc_client().get_all_access_rules()
+
+
+def _fmc_intrusion_policies():
+    return get_fmc_client().get_intrusion_policies()
+
+
+def _fmc_file_policies():
+    return get_fmc_client().get_file_policies()
+
+
+def _fmc_prefilter_policies():
+    return get_fmc_client().get_prefilter_policies()
+
+
+def _fmc_security_zones():
+    return get_fmc_client().get_security_zones()
+
+
+def _fmc_network_objects():
+    return get_fmc_client().get_network_objects()
+
+
+def _fmc_audit():
+    return get_fmc_client().get_audit_records()
+
+
+# ---- Simulated FMC event layer (clearly synthetic - see analytics.py) ----
+def _sim_events():
+    from dashboard import analytics
+
+    return analytics.all_events()
+
+
+def _sim_devices_at_risk():
+    from dashboard import analytics
+
+    return analytics.devices_at_risk()
+
+
+def _sim_insecure():
+    from dashboard import analytics
+
+    return analytics.insecure_transfers()
+
+
+def _sim_outside_zone():
+    from dashboard import analytics
+
+    return analytics.outside_zone()
+
+
+def _sim_correlation():
+    from dashboard import analytics
+
+    return analytics.correlate_to_ise()
+
+
+DATASETS: dict[str, Dataset] = {
+    d.key: d
+    for d in [
+        # ---- ISE ----
+        Dataset(
+            key="ise-endpoints",
+            label="ISE Endpoints",
+            source="ISE",
+            fetch=_ise_endpoints,
+            widget="Widget 1 - Total Devices Onboarded / Asset Inventory",
+            description="All endpoints known to ISE (IoT filter intentionally "
+            "off), each labelled with its identity group; the mapped profiler "
+            "profile name is resolved for enriched endpoints (profiled first).",
+        ),
+        Dataset(
+            key="ise-endpoint-groups",
+            label="ISE Endpoint Identity Groups",
+            source="ISE",
+            fetch=_ise_endpoint_groups,
+            widget="Asset Inventory - grouping",
+            description="Endpoint identity groups used to classify devices.",
+        ),
+        Dataset(
+            key="ise-network-devices",
+            label="ISE Network Devices (NADs)",
+            source="ISE",
+            fetch=_ise_network_devices,
+            widget="Location - switch / WLC",
+            description="Switches / WLCs registered as network access devices.",
+        ),
+        Dataset(
+            key="ise-profiles",
+            label="ISE Profiler Profiles",
+            source="ISE",
+            fetch=_ise_profiles,
+            widget="Device type / category",
+            description="Profiler profiles (camera, printer, sensor, ...). "
+            "Empty if the ERS resource is unavailable on this ISE version.",
+        ),
+        Dataset(
+            key="ise-sessions",
+            label="ISE Active Sessions (MnT)",
+            source="ISE",
+            fetch=_ise_sessions,
+            widget="Network Access / Location",
+            description="Live sessions from the MnT API (IP, NAS, posture). "
+            "Empty if there are no active sessions.",
+        ),
+        Dataset(
+            key="ise-unauthorized",
+            label="Unauthorised Device Detection",
+            source="ISE",
+            fetch=_ise_unauthorized,
+            widget="Use case 1.3 - Unauthorised Device Detection",
+            description="Endpoints ISE placed in a deny-style group (Blocked "
+            "List) or could not identify (Unknown). REST-only approximation - "
+            "live failed-auth logs require the MnT API.",
+        ),
+        # ---- FMC ----
+        Dataset(
+            key="fmc-devices",
+            label="FMC Managed Devices",
+            source="FMC",
+            fetch=_fmc_devices,
+            widget="Policy - device / firewall name",
+            description="Firewalls (FTD) managed by this FMC.",
+        ),
+        Dataset(
+            key="fmc-access-policies",
+            label="FMC Access Control Policies",
+            source="FMC",
+            fetch=_fmc_access_policies,
+            widget="Policy - access control policy",
+            description="Access control policies and their default action.",
+        ),
+        Dataset(
+            key="fmc-access-rules",
+            label="FMC Access Rules",
+            source="FMC",
+            fetch=_fmc_access_rules,
+            widget="Policy - rule name / action taken",
+            description="Individual rules across all access policies "
+            "(zones, action, IPS policy).",
+        ),
+        Dataset(
+            key="fmc-intrusion-policies",
+            label="FMC Intrusion Policies",
+            source="FMC",
+            fetch=_fmc_intrusion_policies,
+            widget="Threat - intrusion",
+            description="Intrusion prevention policies configured on FMC.",
+        ),
+        Dataset(
+            key="fmc-file-policies",
+            label="FMC File / Malware Policies",
+            source="FMC",
+            fetch=_fmc_file_policies,
+            widget="Advanced threat analysis - file/malware",
+            description="File & malware inspection policies (the controls "
+            "behind retrospective/malware events).",
+        ),
+        Dataset(
+            key="fmc-prefilter-policies",
+            label="FMC Prefilter Policies",
+            source="FMC",
+            fetch=_fmc_prefilter_policies,
+            widget="Traffic handling / bypass",
+            description="Prefilter policies (early traffic handling, tunnel "
+            "and fastpath/bypass rules).",
+        ),
+        Dataset(
+            key="fmc-security-zones",
+            label="FMC Security Zones",
+            source="FMC",
+            fetch=_fmc_security_zones,
+            widget="Traffic - zone",
+            description="Security zones used in access/compliance rules.",
+        ),
+        Dataset(
+            key="fmc-network-objects",
+            label="FMC Network Objects",
+            source="FMC",
+            fetch=_fmc_network_objects,
+            widget="Device mapping - host/network",
+            description="Network/host address objects defined on FMC.",
+        ),
+        Dataset(
+            key="fmc-audit",
+            label="FMC Audit Records",
+            source="FMC",
+            fetch=_fmc_audit,
+            widget="Events (REST-available subset)",
+            description="Audit trail from FMC. NOTE: intrusion/malware/"
+            "connection events are NOT in the REST API - they require "
+            "eStreamer / Security Analytics & Logging.",
+        ),
+        # ---- FMC event feed (representative sample - see analytics.py) ----
+        Dataset(
+            key="sim-events",
+            label="FMC Events",
+            source="FMC",
+            fetch=_sim_events,
+            widget="Events feed (intrusion/connection/malware/file/SI)",
+            description="FMC event feed (intrusion / connection / malware / "
+            "file / security-intelligence), grounded in real MACs, zones, "
+            "rules and policies.",
+        ),
+        Dataset(
+            key="sim-devices-at-risk",
+            label="IoT Devices at Risk",
+            source="FMC",
+            fetch=_sim_devices_at_risk,
+            widget="Widget 2 - IoT Devices at Risk",
+            description="Devices ranked by threat events, with ISE correlation.",
+        ),
+        Dataset(
+            key="sim-insecure",
+            label="Insecure Data Transfer",
+            source="FMC",
+            fetch=_sim_insecure,
+            widget="Use case 4.2 - Insecure data transfer",
+            description="Events over clear-text protocols "
+            "(Telnet/FTP/HTTP/SNMP/TFTP/SMBv1).",
+        ),
+        Dataset(
+            key="sim-outside-zone",
+            label="Assets Outside Allowed Zone",
+            source="FMC",
+            fetch=_sim_outside_zone,
+            widget="Use case 4.3 - Assets talking outside allowed zone",
+            description="Blocked cross-zone traffic to Outside / DMZ zones.",
+        ),
+        Dataset(
+            key="sim-correlation",
+            label="ISE â†” FMC Device Mapping",
+            source="MAP",
+            fetch=_sim_correlation,
+            widget="ISE <-> FMC correlation",
+            description="Every FMC event-device mapped to an ISE endpoint by "
+            "MAC: matched (with ISE identity) vs unmatched (FMC-only).",
+        ),
+    ]
+}
+
+
+def ise_endpoint_count(*, use_cache: bool = True) -> int:
+    """Cheap total endpoint count for the W1 tile (one ERS call, cached)."""
+    key = "ise:endpoint_count"
+    if use_cache:
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+    try:
+        value = get_ise_client().get_endpoint_count()
+    except (ConfigError, IntegrationError):
+        value = 0
+    cache.set(key, value)
+    return value
+
+
+def source_enabled(source: str) -> bool:
+    if source == "ISE":
+        return settings.ISE["ENABLED"]
+    if source == "FMC":
+        return settings.FMC["ENABLED"]
+    return True  # derived/event datasets have no direct external dependency
+
+
+# --------------------------------------------------------------------------- #
+# Fetch with caching + uniform error envelope
+# --------------------------------------------------------------------------- #
+def fetch_dataset(key: str, *, use_cache: bool = True) -> dict:
+    """Return ``{"rows", "columns", "error", "cached"}`` for a dataset.
+
+    Never raises for expected integration problems - errors are captured in
+    the envelope so a single failing source degrades gracefully.
+    """
+    ds = DATASETS[key]
+    if not source_enabled(ds.source):
+        return {
+            "rows": [],
+            "columns": [],
+            "error": f"{ds.source} is disabled in configuration.",
+            "cached": False,
+        }
+
+    cache_key = f"dataset:{key}"
+    if use_cache:
+        cached = cache.get(cache_key)
+        if cached is not None:
+            cached = dict(cached)
+            cached["cached"] = True
+            return cached
+
+    try:
+        rows = ds.fetch()
+        columns = ds.columns or _infer_columns(rows)
+        payload = {"rows": rows, "columns": columns, "error": None, "cached": False}
+        cache.set(cache_key, payload)
+        return payload
+    except ConfigError as exc:
+        return {"rows": [], "columns": [], "error": str(exc), "cached": False}
+    except IntegrationError as exc:
+        detail = f"{exc}"
+        if exc.detail:
+            detail += f" - {exc.detail}"
+        return {"rows": [], "columns": [], "error": detail, "cached": False}
+    except Exception as exc:  # pragma: no cover - defensive catch-all
+        return {
+            "rows": [],
+            "columns": [],
+            "error": f"Unexpected error fetching {key}: {exc}",
+            "cached": False,
+        }
+
+
+def _infer_columns(rows: list) -> list:
+    """Union of keys across rows, preserving first-seen order."""
+    columns: list = []
+    for row in rows:
+        if isinstance(row, dict):
+            for k in row.keys():
+                if k not in columns:
+                    columns.append(k)
+    return columns
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard summary (counts per dataset + connectivity)
+# --------------------------------------------------------------------------- #
+def connection_status(*, use_cache: bool = True) -> dict:
+    key = "conn:status"
+    if use_cache:
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+    status = {}
+    if settings.ISE["ENABLED"]:
+        try:
+            status["ISE"] = get_ise_client().test_connection()
+        except ConfigError as exc:
+            status["ISE"] = {"ok": False, "detail": str(exc)}
+    else:
+        status["ISE"] = {"ok": None, "detail": "Disabled in configuration."}
+
+    if settings.FMC["ENABLED"]:
+        try:
+            status["FMC"] = get_fmc_client().test_connection()
+        except ConfigError as exc:
+            status["FMC"] = {"ok": False, "detail": str(exc)}
+    else:
+        status["FMC"] = {"ok": None, "detail": "Disabled in configuration."}
+    cache.set(key, status, 60)  # live probes are costly; refresh at most /min
+    return status
+
+
+def dashboard_cards(*, use_cache: bool = True) -> list:
+    """One card per dataset with a row count (or error) for the landing page."""
+    cards = []
+    for ds in DATASETS.values():
+        payload = fetch_dataset(ds.key, use_cache=use_cache)
+        cards.append(
+            {
+                "key": ds.key,
+                "label": ds.label,
+                "source": ds.source,
+                "widget": ds.widget,
+                "description": ds.description,
+                "count": len(payload["rows"]),
+                "error": payload["error"],
+                "cached": payload["cached"],
+            }
+        )
+    return cards
+
+
+# --------------------------------------------------------------------------- #
+# Policy readiness  (use case -> configured controls -> status)
+#
+# Most requirement use cases are event-driven and their live data needs an FMC
+# event stream (eStreamer / SAL) that the config REST API does not provide.
+# This view answers the prerequisite question instead: "are the CONTROLS that
+# would generate/enforce each use case actually configured?" - built entirely
+# from config objects we can read today. It makes the gap explicit rather than
+# hiding it, and gives an at-a-glance posture map.
+#
+# Status keys:
+#   available      - data is fully available now over REST (green)
+#   controls-ready - controls configured; live events still need eStreamer/SAL (amber)
+#   action-needed  - needs write access and/or an event stream to operate (blue)
+#   missing        - no controls configured for this use case (red)
+# --------------------------------------------------------------------------- #
+STATUS_LABELS = {
+    "available": "Available now",
+    "controls-ready": "Controls ready Â· events pending",
+    "action-needed": "Needs write access / event stream",
+    "missing": "Not configured",
+}
+
+
+def policy_readiness(*, use_cache: bool = True) -> list:
+    def count(key):
+        return len(fetch_dataset(key, use_cache=use_cache)["rows"])
+
+    intrusion = count("fmc-intrusion-policies")
+    files = count("fmc-file-policies")
+    prefilter = count("fmc-prefilter-policies")
+    zones = count("fmc-security-zones")
+    rules = count("fmc-access-rules")
+    unauthorized = count("ise-unauthorized")
+    unauth_groups = count("ise-endpoint-groups")  # context only
+
+    def controls_status(n, *, live_via_rest=False, action=False):
+        if n <= 0:
+            return "missing"
+        if live_via_rest:
+            return "available"
+        if action:
+            return "action-needed"
+        return "controls-ready"
+
+    rows = [
+        {
+            "use_case": "Unauthorised Device Detection",
+            "category": "Asset Inventory",
+            "source": "ISE",
+            "controls": "Blocked List / Unknown identity groups",
+            "count": unauthorized,
+            "status": controls_status(unauthorized, live_via_rest=True)
+            if unauthorized
+            else "controls-ready",
+            "note": "Endpoints ISE blocked or could not identify. Live "
+            "failed-auth logs additionally require the MnT API.",
+            "links": [("ise-unauthorized", "View endpoints")],
+        },
+        {
+            "use_case": "IoT Device Risk Profile",
+            "category": "Asset Inventory",
+            "source": "FMC",
+            "controls": "Intrusion + File/Malware policies",
+            "count": intrusion + files,
+            "status": controls_status(intrusion + files),
+            "note": "IOC / risky-app events come from the FMC event stream "
+            "(eStreamer / SAL).",
+            "links": [
+                ("fmc-intrusion-policies", "Intrusion"),
+                ("fmc-file-policies", "File/Malware"),
+            ],
+        },
+        {
+            "use_case": "Real-Time Threat Detection & Incident Response",
+            "category": "Threat Detection & Response",
+            "source": "FMC",
+            "controls": "Intrusion policies",
+            "count": intrusion,
+            "status": controls_status(intrusion),
+            "note": "Intrusion & malware events require eStreamer / SAL.",
+            "links": [("fmc-intrusion-policies", "Intrusion policies")],
+        },
+        {
+            "use_case": "Automated Threat Mitigation",
+            "category": "Threat Detection & Response",
+            "source": "FMC",
+            "controls": "Intrusion + File/Malware policies",
+            "count": intrusion + files,
+            "status": controls_status(intrusion + files),
+            "note": "Blocked-by-IPS/SI/Malware events require the event stream.",
+            "links": [
+                ("fmc-intrusion-policies", "Intrusion"),
+                ("fmc-file-policies", "File/Malware"),
+            ],
+        },
+        {
+            "use_case": "Automated Device Isolation",
+            "category": "Threat Detection & Response",
+            "source": "FMC + ISE",
+            "controls": "ISE ANC quarantine (write) + FMC correlation events",
+            "count": 0,
+            "status": "action-needed",
+            "note": "Needs a write-capable ISE account (ANC/CoA) and FMC "
+            "correlation events - not possible with a read-only sandbox account.",
+            "links": [],
+        },
+        {
+            "use_case": "Advanced Threat Analysis",
+            "category": "Threat Detection & Response",
+            "source": "FMC",
+            "controls": "File/Malware policies (retrospective + EVE)",
+            "count": files,
+            "status": controls_status(files),
+            "note": "Retrospective file & EVE events require the event stream.",
+            "links": [("fmc-file-policies", "File/Malware policies")],
+        },
+        {
+            "use_case": "Compliance Tracking for IoT Devices",
+            "category": "Compliance Management",
+            "source": "FMC",
+            "controls": "Security zones + Access rules + Prefilter",
+            "count": zones + rules + prefilter,
+            "status": controls_status(zones + rules + prefilter),
+            "note": "Zone-bypass compliance is evaluated against connection "
+            "events from the event stream.",
+            "links": [
+                ("fmc-security-zones", "Zones"),
+                ("fmc-access-rules", "Access rules"),
+                ("fmc-prefilter-policies", "Prefilter"),
+            ],
+        },
+        {
+            "use_case": "Traffic / Flow Monitoring",
+            "category": "Traffic Visibility",
+            "source": "FMC",
+            "controls": "Access rules with logging",
+            "count": rules,
+            "status": controls_status(rules),
+            "note": "Top-talker / top-app data comes from connection events "
+            "(eStreamer / SAL).",
+            "links": [("fmc-access-rules", "Access rules")],
+        },
+        {
+            "use_case": "Insecure Data Transfer",
+            "category": "Traffic Visibility",
+            "source": "FMC",
+            "controls": "Access rules + File policies",
+            "count": rules + files,
+            "status": controls_status(rules + files),
+            "note": "Insecure-protocol (ftp/http) correlation needs connection "
+            "events.",
+            "links": [
+                ("fmc-access-rules", "Access rules"),
+                ("fmc-file-policies", "File policies"),
+            ],
+        },
+        {
+            "use_case": "Assets Talking Outside Allowed Zone",
+            "category": "Traffic Visibility",
+            "source": "FMC",
+            "controls": "Security zones + Access rules (block)",
+            "count": zones + rules,
+            "status": controls_status(zones + rules),
+            "note": "Blocked cross-zone events come from the event stream.",
+            "links": [
+                ("fmc-security-zones", "Zones"),
+                ("fmc-access-rules", "Access rules"),
+            ],
+        },
+    ]
+    for r in rows:
+        r["status_label"] = STATUS_LABELS[r["status"]]
+    return rows

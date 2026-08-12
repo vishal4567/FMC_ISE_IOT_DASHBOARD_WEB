@@ -1,0 +1,17 @@
+[Unit]
+Description=IoT Security Dashboard - web (gunicorn)
+After=network-online.target postgresql.service redis.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=iotdash
+Group=iotdash
+WorkingDirectory=/opt/iotdash
+EnvironmentFile=/opt/iotdash/.env.prod
+ExecStart=/opt/iotdash/.venv/bin/gunicorn -c /opt/iotdash/deploy/gunicorn.conf.py config.wsgi:application
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
