@@ -51,6 +51,7 @@ def poll_ise_inventory() -> dict:
                 "ise_identity_group": e.get("identity_group", ""),
                 "ise_profile": e.get("endpoint_profile", ""),
                 "device_type": _device_type_from(e),
+                "site": e.get("site", ""),
                 "correlation": "Matched",
                 "ise_endpoint_mac": mac,
                 "last_seen": now,
@@ -62,9 +63,13 @@ def poll_ise_inventory() -> dict:
 
 
 def _device_type_from(endpoint: dict) -> str:
-    """Derive a device *type* from ISE identity. In real ISE the profiler
-    profile (e.g. 'Axis-Device', 'Cisco-IP-Phone') is the device type; fall back
-    to the identity group."""
+    """Derive a device *type* from ISE identity. Preference order:
+    1. the org's "Device Type" custom attribute (ISE Context Visibility column),
+    2. the profiler profile (e.g. 'Axis-Device', 'Cisco-IP-Phone'),
+    3. the identity group."""
+    attr = (endpoint.get("device_type_attr") or "").strip()
+    if attr:
+        return attr
     prof = (endpoint.get("endpoint_profile") or "").strip()
     if prof and prof.lower() not in ("unknown / unprofiled", "(detail not fetched)"):
         return prof

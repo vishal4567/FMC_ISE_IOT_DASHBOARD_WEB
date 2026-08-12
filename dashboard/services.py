@@ -65,6 +65,8 @@ def get_ise_client() -> ISEClient:
             detail_limit=cfg["DETAIL_LIMIT"],
             page_size=cfg["PAGE_SIZE"],
             max_pages=cfg["MAX_PAGES"],
+            site_attr=cfg["SITE_ATTR"],
+            device_type_attr=cfg["DEVICE_TYPE_ATTR"],
         )
         _CLIENT_CACHE[key] = client
     return client

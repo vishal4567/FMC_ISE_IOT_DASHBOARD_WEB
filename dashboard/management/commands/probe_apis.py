@@ -42,6 +42,10 @@ class Command(BaseCommand):
                             help="directory for the per-probe JSON files")
         parser.add_argument("--full-endpoint", action="store_true",
                             help="(with --all) also fetch one full /endpoint/{id} JSON")
+        parser.add_argument("--mac", default="",
+                            help="dump the FULL endpoint JSON (ERS + Open API) for "
+                                 "this MAC, incl. all customAttributes — use it to "
+                                 "confirm the site/device-type attribute names")
         parser.add_argument("--all", action="store_true",
                             help="also run the full ERS catalogue, MnT, FMC and "
                                  "eStreamer probes (default: only Open API + location)")
@@ -60,6 +64,13 @@ class Command(BaseCommand):
         self._probe_ise_openapi()
         self._section("Cisco ISE (Location)")
         self._probe_location()
+
+        # Targeted: dump one MAC's full endpoint (ERS + Open API) with all its
+        # custom attributes — the definitive way to see where the ISE Context
+        # Visibility "Location" / "Device Type" columns come from.
+        if opts.get("mac"):
+            self._section(f"Cisco ISE (endpoint by MAC: {opts['mac']})")
+            self._probe_endpoint_by_mac(opts["mac"])
 
         # Everything else only with --all.
         if opts["all"]:
@@ -173,9 +184,6 @@ class Command(BaseCommand):
         if self._opts.get("full_endpoint"):
             self._run("ise.endpoint_full", lambda: self._full_endpoint(ise))
 
-        if self._opts.get("full_endpoint"):
-            self._run("ise.endpoint_full", lambda: self._full_endpoint(ise))
-
     def _device_types(self, ise):
         profiles = sorted(p["name"] for p in ise.get_profiler_profiles() if p.get("name"))
         groups = sorted(g["name"] for g in ise.get_endpoint_groups() if g.get("name"))
@@ -191,6 +199,40 @@ class Command(BaseCommand):
         if not res:
             return {"note": "no endpoints"}
         return ise._ers_get(f"/endpoint/{res[0]['id']}")
+
+    def _probe_endpoint_by_mac(self, mac):
+        """Fetch ONE endpoint by MAC via both ERS and the Open API and dump the
+        FULL JSON (not truncated), so the exact custom-attribute names for
+        site/device-type are visible. Writes ise.endpoint_by_mac.* files."""
+        ise = getattr(self, "_ise", None)
+        if not ise:
+            self.stdout.write("  (ISE client unavailable)")
+            return
+        mac = mac.strip().upper()
+
+        def _ers_by_mac():
+            # ERS supports filtering the endpoint list by MAC.
+            lst = ise._ers_get("/endpoint", {"filter": f"mac.EQ.{mac}"})
+            res = (lst.get("SearchResult", {}) or {}).get("resources", [])
+            if not res:
+                return {"note": f"no ERS endpoint for {mac}"}
+            full = ise._ers_get(f"/endpoint/{res[0]['id']}")
+            ep = full.get("ERSEndPoint", full) if isinstance(full, dict) else full
+            return {"customAttributes": (ep or {}).get("customAttributes"),
+                    "resolved": {"site": ise.site_attr, "device_type": ise.device_type_attr},
+                    "full": full}
+
+        def _openapi_by_mac():
+            # Open API returns rich attributes inline, incl. deviceType + customAttributes.
+            url = f"https://{ise.host}/api/v1/endpoint/{mac}"
+            r = ise._session.get(url, headers={"Accept": "application/json"},
+                                 timeout=ise.timeout)
+            if r.status_code >= 400:
+                raise RuntimeError(f"HTTP {r.status_code}: {r.text[:150]}")
+            return r.json()
+
+        self._run("ise.endpoint_by_mac.ers", _ers_by_mac)
+        self._run("ise.endpoint_by_mac.openapi", _openapi_by_mac)
 
     def _full_network_device(self, ise):
         lst = ise._ers_get("/networkdevice", {"size": 1, "page": 1})

@@ -203,6 +203,11 @@ ISE = {
     "DETAIL_LIMIT": _env_int("ISE_DETAIL_LIMIT", 50),
     "PAGE_SIZE": _env_int("ISE_PAGE_SIZE", 100),
     "MAX_PAGES": _env_int("ISE_MAX_PAGES", 20),
+    # Names of the ISE endpoint custom attributes that carry site/location and
+    # device type (the "Location" / "Device Type" columns in ISE Context
+    # Visibility). Override if your org named them differently.
+    "SITE_ATTR": os.environ.get("ISE_SITE_ATTR", "Location"),
+    "DEVICE_TYPE_ATTR": os.environ.get("ISE_DEVICE_TYPE_ATTR", "Device Type"),
 }
 
 # ---------------------------------------------------------------------------

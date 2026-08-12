@@ -45,6 +45,8 @@ class ISEClient:
         detail_limit=50,
         page_size=100,
         max_pages=20,
+        site_attr="Location",
+        device_type_attr="Device Type",
     ):
         if not host or not username or not password:
             raise ConfigError(
@@ -60,6 +62,11 @@ class ISEClient:
         self.detail_limit = detail_limit
         self.page_size = page_size
         self.max_pages = max_pages
+        # Names of the ISE endpoint *custom attributes* that carry site/location
+        # and device type (as seen in the ISE Context Visibility columns). These
+        # are org-defined, so they're configurable.
+        self.site_attr = site_attr
+        self.device_type_attr = device_type_attr
 
         self._session = requests.Session()
         self._session.auth = HTTPBasicAuth(username, password)
@@ -188,6 +195,18 @@ class ISEClient:
 
         return [self._endpoint_row(b, detailed.get(b["id"]), profile_map) for b in base]
 
+    @staticmethod
+    def _flatten_custom_attrs(full):
+        """Return the endpoint's custom attributes as a flat ``{name: value}``
+        dict. ERS nests them as ``customAttributes.customAttributes``; the Open
+        API returns a flat ``customAttributes`` - handle both."""
+        if not isinstance(full, dict):
+            return {}
+        ca = full.get("customAttributes") or {}
+        if isinstance(ca, dict) and isinstance(ca.get("customAttributes"), dict):
+            ca = ca["customAttributes"]
+        return ca if isinstance(ca, dict) else {}
+
     def _profiler_profile_name(self, profile_id):
         """Resolve a single profiler-profile id -> name, memoised per client."""
         cache = self.__dict__.setdefault("_profile_name_cache", {})
@@ -238,8 +257,7 @@ class ISEClient:
         data = self._ers_get(f"/endpoint/{endpoint_id}")
         return data.get("ERSEndPoint", data) if isinstance(data, dict) else {}
 
-    @staticmethod
-    def _endpoint_row(base, full, profile_map):
+    def _endpoint_row(self, base, full, profile_map):
         row = {
             "mac": base["mac"],
             "identity_group": base["group"],
@@ -247,6 +265,9 @@ class ISEClient:
             "static_group_assignment": "",
             "endpoint_id": base["id"],
             "description": "",
+            "custom_attributes": {},
+            "site": "",
+            "device_type_attr": "",
         }
         if full:
             pid = full.get("profileId", "")
@@ -256,6 +277,12 @@ class ISEClient:
                 row["endpoint_profile"] = "Unknown / unprofiled"
             row["static_group_assignment"] = full.get("staticGroupAssignment", "")
             row["description"] = full.get("description", "")
+            # Org-defined custom attributes carry site (Location) + device type,
+            # as shown in the ISE Context Visibility columns.
+            ca = self._flatten_custom_attrs(full)
+            row["custom_attributes"] = ca
+            row["site"] = str(ca.get(self.site_attr, "") or "")
+            row["device_type_attr"] = str(ca.get(self.device_type_attr, "") or "")
         else:
             # Not enriched - identity group still conveys the profile category.
             row["endpoint_profile"] = "(detail not fetched)"

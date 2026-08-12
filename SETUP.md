@@ -64,6 +64,12 @@ ISE_USERNAME=<ers-user>
 ISE_PASSWORD=<ers-pass>
 ISE_ERS_PORT=443              # try 443 first; 9060 if that times out
 ISE_VERIFY_TLS=True
+# ISE endpoint custom-attribute names that hold site + device type (the
+# "Location" / "Device Type" columns in ISE Context Visibility). Defaults shown;
+# override only if your org named them differently — confirm with:
+#   manage.py probe_apis --mac <a-known-MAC>
+ISE_SITE_ATTR=Location
+ISE_DEVICE_TYPE_ATTR=Device Type
 
 FMC_HOST=<fmc-host>
 FMC_USERNAME=<fmc-user>
