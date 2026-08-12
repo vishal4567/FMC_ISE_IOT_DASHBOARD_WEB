@@ -1,0 +1,72 @@
+{
+    "@comment": [
+        "eNcore estreamer.conf tailored for this dashboard's FMC ingestion.",
+        "Copy to /opt/eStreamer-eNcore/estreamer.conf and set the FMC IP below.",
+        "Feeds:  encore.sh foreground | manage.py estreamer_ingest --source stdin"
+    ],
+    "connectTimeout": 10,
+    "enabled": true,
+    "alwaysAttemptToContinue": true,
+    "handler": {
+        "outputters": [
+            {
+                "@comment": "JSON to stdout so it can be piped into estreamer_ingest --source stdin. For a durable on-disk buffer instead, set uri to 'relfile:///data/json/encore.{0}.log' and run estreamer_ingest --source file.",
+                "adapter": "json",
+                "enabled": true,
+                "stream": {
+                    "uri": "stdout://"
+                }
+            }
+        ],
+        "records": {
+            "@comment": "Which record types to OUTPUT. IoT dashboard needs traffic + threats; packets/rna/rua left off to cut volume. If file/malware events don't arrive, add their record type numbers to 'include'.",
+            "connections": true,
+            "core": true,
+            "intrusion": true,
+            "metadata": true,
+            "packets": false,
+            "rna": false,
+            "rua": false,
+            "include": [],
+            "exclude": []
+        }
+    },
+    "logging": {
+        "@comment": "stdOut MUST be false — stdout carries the JSON events for the pipe; log lines there would corrupt it.",
+        "filepath": "estreamer.log",
+        "format": "%(asctime)s %(name)-12s %(levelname)-8s %(message)s",
+        "level": "INFO",
+        "stdOut": false
+    },
+    "monitor": {
+        "bookmark": false,
+        "handled": true,
+        "period": 120,
+        "subscribed": true,
+        "velocity": false
+    },
+    "responseTimeout": 2,
+    "start@comment": "0 = from genesis (all history), 1 = now, 2 = resume from bookmark (recommended).",
+    "start": 2,
+    "subscription": {
+        "records": {
+            "archiveTimestamps": true,
+            "eventExtraData": true,
+            "extended": true,
+            "impactEventAlerts": true,
+            "intrusion": true,
+            "metadata": true,
+            "packetData": false
+        },
+        "servers": [
+            {
+                "@comment": "Set host to the FMC MANAGEMENT IP. pkcs12 is the cert from FMC > System > Integration > eStreamer > Create Client (for THIS host's IP).",
+                "host": "CHANGE_ME_FMC_MGMT_IP",
+                "pkcs12Filepath": "client.pkcs12",
+                "port": 8302,
+                "tlsVersion": 1.2
+            }
+        ]
+    },
+    "workerProcesses": 4
+}

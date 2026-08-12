@@ -38,34 +38,26 @@ cp /path/to/client.pkcs12 ./client.pkcs12     # default filename eNcore expects
 community mirror. Match its README to your version.)
 
 ## 3. Configure `estreamer.conf`
-Edit `estreamer.conf` (JSON). The keys that matter:
-
-```jsonc
-{
-  "connections": [
-    { "server": "<FMC-IP>", "port": 8302 }        // eStreamer endpoint
-  ],
-  "pkcs12Filepath": "client.pkcs12",              // the cert from step 1
-  "subscription": {                               // which records to request
-    "records": {
-      "intrusion": true, "connection": true,
-      "fileEvent": true, "malware": true, "impact": true
-    }
-  },
-  "handler": {
-    "outputters": [
-      { "adapter": "json",                        // <-- JSON output
-        "stream": { "uri": "stdout://" } }        // <-- to stdout so we can pipe
-    ]
-  }
-}
+A ready-made, FMC-tailored config is in this repo:
+**[deploy/estreamer.conf.example](deploy/estreamer.conf.example)**. Copy it over
+eNcore's and set the FMC IP:
+```bash
+cp /opt/iotdash/deploy/estreamer.conf.example /opt/eStreamer-eNcore/estreamer.conf
+# edit /opt/eStreamer-eNcore/estreamer.conf:
+#   subscription.servers[0].host  ->  your FMC management IP
 ```
-- **`adapter: "json"`** + **`stream.uri: "stdout://"`** is what lets us pipe into
-  the ingester. (Alternatively write to a file: `"relfile://encore.log"` and run
-  `estreamer_ingest --source file --path encore.log`.)
-- Exact key names vary slightly by eNcore version — open your `estreamer.conf` and
-  set the server/port, the pkcs12 path, the subscriptions, and a **json/stdout**
-  outputter.
+What it sets (based on the real eNcore schema):
+- **`subscription.servers[0]`** → `{host: <FMC-IP>, port: 8302, pkcs12Filepath: "client.pkcs12", tlsVersion: 1.2}`.
+- **`handler.outputters`** → a single **`json`** adapter with **`stream.uri: "stdout://"`** so it pipes into `estreamer_ingest --source stdin`. (The stock config wrote JSON to a rotating file and also had a CEF/Sentinel outputter — both removed.)
+- **`logging.stdOut: false`** — *critical*: stdout must carry only the JSON events, or log lines corrupt the pipe.
+- **`handler.records`** → `connections, core, intrusion, metadata` on; `packets, rna, rua` off (cut volume/disk). If file/malware events don't arrive, add their record type numbers to `handler.records.include`.
+- **`subscription.records.packetData: false`** (don't stream raw packets).
+- **`start: 2`** → resume from bookmark after restarts.
+
+> **Durable alternative (no stdout pipe):** set the json outputter's
+> `stream.uri` to `"relfile:///data/json/encore.{0}.log"` (rotating files) and
+> run `estreamer_ingest --source file` — survives ingester restarts, at the cost
+> of disk under `/data/json` (watch capacity — see SETUP_GUIDE troubleshooting).
 
 ## 4. Test the handshake
 ```bash
