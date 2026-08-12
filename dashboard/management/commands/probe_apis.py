@@ -37,8 +37,17 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--out", default="api_responses.json")
+        parser.add_argument(
+            "--device-types-out", default="device_types.json",
+            help="write the full ISE device-type catalogue (profiler profiles + "
+                 "identity groups) here, for building an import allow-list")
+        parser.add_argument(
+            "--full-endpoint", action="store_true",
+            help="also fetch one endpoint's complete /endpoint/{id} JSON "
+                 "(all attributes) into the output file")
 
     def handle(self, *args, **opts):
+        self._opts = opts
         self._t0 = time.perf_counter()
         self._ok = 0
         self._err = 0
@@ -122,6 +131,40 @@ class Command(BaseCommand):
                                    lambda p=path, q=params: _sample(ise._ers_get(p, q)))
         out["mnt_sessions"] = self._run("ise.mnt_sessions",
                                         lambda: ise.get_active_sessions()[:2])
+
+        # --- full device-type catalogue (for building an import allow-list) ---
+        res = self._run("ise.device_types", lambda: self._device_types(ise))
+        out["device_types"] = res
+        if res.get("ok"):
+            import json as _json
+            path = self._opts["device_types_out"]
+            with open(path, "w", encoding="utf-8") as f:
+                _json.dump(res["sample"], f, indent=2)
+            self.stdout.write(self.style.SUCCESS(f"     ↳ wrote {path}"))
+
+        # --- one full endpoint JSON (all attributes) ---
+        if self._opts.get("full_endpoint"):
+            out["endpoint_full"] = self._run("ise.endpoint_full",
+                                             lambda: self._full_endpoint(ise))
+
+    def _device_types(self, ise):
+        """Every ISE device type: profiler profiles + endpoint identity groups
+        (names, sorted). This is the source list for an import allow-list."""
+        profiles = sorted(p["name"] for p in ise.get_profiler_profiles() if p.get("name"))
+        groups = sorted(g["name"] for g in ise.get_endpoint_groups() if g.get("name"))
+        return {
+            "identity_groups": groups,
+            "profiler_profiles": profiles,
+            "counts": {"identity_groups": len(groups), "profiler_profiles": len(profiles)},
+        }
+
+    def _full_endpoint(self, ise):
+        """Complete /endpoint/{id} JSON for the first endpoint (all attributes)."""
+        lst = ise._ers_get("/endpoint", {"size": 1, "page": 1})
+        res = (lst.get("SearchResult", {}) or {}).get("resources", [])
+        if not res:
+            return {"note": "no endpoints"}
+        return ise._ers_get(f"/endpoint/{res[0]['id']}")   # untrimmed, full detail
 
     # ---- FMC ----------------------------------------------------------------
     def _probe_fmc(self, out):
