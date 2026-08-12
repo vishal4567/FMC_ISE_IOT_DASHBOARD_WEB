@@ -31,3 +31,7 @@ Thumbs.db
 *.key
 *.jsonl
 encore-sample*
+
+# probe output
+api_out/
+api_responses.json
