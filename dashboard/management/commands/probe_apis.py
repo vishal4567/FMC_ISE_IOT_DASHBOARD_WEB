@@ -52,6 +52,8 @@ class Command(BaseCommand):
 
         self._section("Cisco ISE (ERS)")
         self._probe_ise()
+        self._section("Cisco ISE (Open API /api/v1)")
+        self._probe_ise_openapi()
         self._section("Cisco ISE (MnT)")
         self._probe_ise_mnt()
         self._section("Cisco FMC")
@@ -169,6 +171,35 @@ class Command(BaseCommand):
         if not res:
             return {"note": "no network devices"}
         return ise._ers_get(f"/networkdevice/{res[0]['id']}")
+
+    # ---- ISE Open API (/api/v1) ---------------------------------------------
+    def _probe_ise_openapi(self):
+        ise = getattr(self, "_ise", None)
+        if not ise:
+            self.stdout.write("  (ISE client unavailable - skipping Open API)")
+            return
+        # deployment/node reveals the ISE version; endpoint/endpoint-group show
+        # whether the richer Open API endpoint resource is available + its shape.
+        self._run("ise.openapi.deployment_node",
+                  lambda: self._openapi(ise, "/deployment/node", {}))
+        self._run("ise.openapi.endpoint",
+                  lambda: self._openapi(ise, "/endpoint", {"size": 2, "page": 1}))
+        self._run("ise.openapi.endpoint_group",
+                  lambda: self._openapi(ise, "/endpoint-group", {"size": 2, "page": 1}))
+
+    def _openapi(self, ise, path, params):
+        """ISE Open API GET. Base: https://<host>/api/v1 (always :443).
+        Raises on HTTP >= 400 so 404 (not enabled/older ISE) / 401 shows as ERR."""
+        url = f"https://{ise.host}/api/v1{path}"
+        r = ise._session.get(url, params=params,
+                             headers={"Accept": "application/json"}, timeout=ise.timeout)
+        if r.status_code >= 400:
+            raise RuntimeError(f"HTTP {r.status_code}: {r.text[:150]}")
+        try:
+            data = r.json()
+        except ValueError:
+            return {"status": r.status_code, "body": r.text[:2000]}
+        return _sample(data, container_keys=("response", "resources", "items", "SearchResult"))
 
     # ---- ISE MnT (session/location; XML) ------------------------------------
     def _probe_ise_mnt(self):
