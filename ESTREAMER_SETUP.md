@@ -33,9 +33,18 @@ sudo git clone https://github.com/CiscoSecurity/fp-05-microsoft-sentinel-connect
 sudo chown -R iotdash:iotdash /opt/eStreamer-eNcore
 cd /opt/eStreamer-eNcore
 cp /path/to/client.pkcs12 ./client.pkcs12     # default filename eNcore expects
+# make encore.sh runnable directly (strip Windows CRLF + set exec bit):
+sudo dnf -y install dos2unix && dos2unix encore.sh 2>/dev/null || sed -i 's/\r$//' encore.sh
+chmod +x encore.sh
 ```
 (Any eNcore distribution works — `magorbalassy/estreamer-encore` is a common
 community mirror. Match its README to your version.)
+
+> **`encore.sh` won't run directly?** If `./encore.sh` fails with
+> `bad interpreter`, `No such file or directory`, or `Permission denied`, it's
+> CRLF line-endings or a missing exec bit. Either run the two fix commands above
+> **once**, or just prefix every call with `bash` (`bash encore.sh test`) — this
+> guide and the systemd unit already do the latter, so it works either way.
 
 ## 3. Configure `estreamer.conf`
 A ready-made, FMC-tailored config is in this repo:
@@ -62,7 +71,7 @@ What it sets (based on the real eNcore schema):
 ## 4. Test the handshake
 ```bash
 cd /opt/eStreamer-eNcore
-./encore.sh test          # prompts for the pkcs12 password; verifies TLS to :8302
+bash encore.sh test          # prompts for the pkcs12 password; verifies TLS to :8302
 ```
 Also, from this app, sanity-check reachability:
 ```bash
@@ -72,7 +81,7 @@ python manage.py probe_apis --out api_responses.json   # includes an 8302 TCP/TL
 ## 5. Run it and pipe into the ingester
 Manual (first run — watch it in the foreground):
 ```bash
-/opt/eStreamer-eNcore/encore.sh foreground \
+bash /opt/eStreamer-eNcore/encore.sh foreground \
   | /opt/iotdash/.venv/bin/python /opt/iotdash/manage.py estreamer_ingest --source stdin
 ```
 As a service (already provided):
@@ -84,7 +93,7 @@ journalctl -u iotdash-estreamer -f                # watch events land
 ## 6. Capture a sample for parser tuning
 The JSON field names eNcore emits depend on its version/config. Grab a handful:
 ```bash
-/opt/eStreamer-eNcore/encore.sh foreground | head -50 > encore-sample.jsonl
+bash /opt/eStreamer-eNcore/encore.sh foreground | head -50 > encore-sample.jsonl
 ```
 Send `encore-sample.jsonl` (+ `api_responses.json`) back and the mapping in
 `dashboard/estreamer/mapping.py` gets tuned to your exact fields.
@@ -93,7 +102,7 @@ Send `encore-sample.jsonl` (+ `api_responses.json`) back and the mapping in
 - **Firewall:** the eNcore host must reach **FMC:8302** outbound (firewalld/ACLs).
 - **Cert host match:** the "Create Client" hostname/IP must match the eNcore
   host, or FMC refuses the connection.
-- **Password:** `./encore.sh test` stores the pkcs12 password so the service can
+- **Password:** `bash encore.sh test` stores the pkcs12 password so the service can
   start unattended; re-run `test` if you rotate the cert.
 - **Python:** eNcore v4+ needs Python 3.6+. RHEL 9's `python3.11` is fine.
 - **Backpressure at scale:** for very high event rates, have eNcore write to a

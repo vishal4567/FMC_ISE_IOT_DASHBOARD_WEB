@@ -119,10 +119,10 @@ sudo chown -R iotdash:iotdash /opt/eStreamer-eNcore
 cp /path/to/client.pkcs12 /opt/eStreamer-eNcore/client.pkcs12
 # edit /opt/eStreamer-eNcore/estreamer.conf: FMC server + port 8302, pkcs12 path,
 #   subscriptions, and a  json -> stdout  outputter
-cd /opt/eStreamer-eNcore && ./encore.sh test          # verify TLS handshake to :8302
+cd /opt/eStreamer-eNcore && bash encore.sh test          # verify TLS handshake to :8302
 
 # grab a raw sample first (no DB writes) for parser tuning:
-./encore.sh foreground | /opt/iotdash/.venv/bin/python /opt/iotdash/manage.py \
+bash encore.sh foreground | /opt/iotdash/.venv/bin/python /opt/iotdash/manage.py \
     estreamer_ingest --capture /tmp/encore-sample.jsonl --capture-only
 
 # start the ingester service:
@@ -165,7 +165,7 @@ cd /opt/iotdash && git pull && \
 | `dnf` can't install | VM not entitled → step 0 (register / activation key) |
 | W1 = 0 | ISE poll failing → `probe_apis`; flip `ISE_ERS_PORT`; check ERS role/firewall |
 | FMC auth 401/429 | verify account; one client per FMC user; wait a minute |
-| No events | `./encore.sh test`; host→FMC:8302 open; cert host must match eNcore host |
+| No events | `bash encore.sh test`; host→FMC:8302 open; cert host must match eNcore host |
 | nginx 502 | `systemctl status iotdash-web`; `sudo setsebool -P httpd_can_network_connect 1` |
 | disk filling | shorten retention / drop `connection` subscription; see SETUP_GUIDE troubleshooting |
 

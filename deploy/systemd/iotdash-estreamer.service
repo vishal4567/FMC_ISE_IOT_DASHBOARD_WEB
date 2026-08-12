@@ -11,7 +11,7 @@ User=iotdash
 Group=iotdash
 WorkingDirectory=/opt/iotdash
 EnvironmentFile=/opt/iotdash/.env.prod
-ExecStart=/bin/bash -lc '/opt/eStreamer-eNcore/encore.sh foreground | /opt/iotdash/.venv/bin/python manage.py estreamer_ingest --source stdin'
+ExecStart=/bin/bash -lc 'bash /opt/eStreamer-eNcore/encore.sh foreground | /opt/iotdash/.venv/bin/python manage.py estreamer_ingest --source stdin'
 Restart=always
 RestartSec=10
 

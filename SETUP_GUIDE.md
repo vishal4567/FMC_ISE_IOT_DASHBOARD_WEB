@@ -189,10 +189,10 @@ Follow [ESTREAMER_SETUP.md](ESTREAMER_SETUP.md). Summary:
 1. Install eNcore to `/opt/eStreamer-eNcore`, drop in `client.pkcs12`.
 2. Configure `estreamer.conf`: FMC server + port **8302**, `pkcs12Filepath`,
    subscriptions, and a **`json` → `stdout`** outputter.
-3. Test the handshake: `cd /opt/eStreamer-eNcore && ./encore.sh test`.
+3. Test the handshake: `cd /opt/eStreamer-eNcore && bash encore.sh test`.
 4. **Grab a raw sample first** (no DB writes) so parsers can be verified:
    ```bash
-   ./encore.sh foreground | /opt/iotdash/.venv/bin/python /opt/iotdash/manage.py \
+   bash encore.sh foreground | /opt/iotdash/.venv/bin/python /opt/iotdash/manage.py \
        estreamer_ingest --capture /tmp/encore-sample.jsonl --capture-only
    ```
    Send `/tmp/encore-sample.jsonl` back if the fields need mapping tweaks.
@@ -269,7 +269,7 @@ sudo -u iotdash .venv/bin/celery -A config call dashboard.tasks.rollup_hourly
 | W1 = 0, no devices | ISE poll failing | run `probe_apis`; check `ISE_ERS_PORT` (443↔9060), ERS role, firewall |
 | `probe_apis` ISE timeout | wrong ERS port / blocked | flip `ISE_ERS_PORT`; open host→ISE:443/9060 |
 | FMC auth 401/429 | bad creds / token limit | verify account; avoid many clients on one FMC user; wait a minute |
-| No events arriving | eNcore not connected | `./encore.sh test`; check host→FMC:8302; cert host must match; `journalctl -u iotdash-estreamer` |
+| No events arriving | eNcore not connected | `bash encore.sh test`; check host→FMC:8302; cert host must match; `journalctl -u iotdash-estreamer` |
 | Events stored but device_type blank | device not in ISE (FMC-only) | expected — it's a shadow device; runs ISE poll to enrich enrolled ones |
 | Fields parsed wrong | eNcore JSON schema differs | capture with `estreamer_ingest --capture … --capture-only`, send sample, tune `dashboard/estreamer/mapping.py` |
 | nginx 502 | gunicorn down / SELinux | `systemctl status iotdash-web`; `setsebool -P httpd_can_network_connect 1` |
