@@ -12,8 +12,17 @@ from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Load .env (if present) before reading any os.environ values below.
-load_dotenv(BASE_DIR / ".env")
+# Load env files via python-dotenv (robust with special characters in secrets —
+# no fragile `source` needed for manual `manage.py` commands). Prefer .env.prod,
+# then .env. `override=False` so real environment variables (e.g. injected by
+# systemd EnvironmentFile) always win. Point DOTENV_FILE at another path to
+# override. Both files are optional.
+for _envfile in (os.environ.get("DOTENV_FILE", ""), ".env.prod", ".env"):
+    if not _envfile:
+        continue
+    _path = Path(_envfile) if os.path.isabs(_envfile) else BASE_DIR / _envfile
+    if _path.exists():
+        load_dotenv(_path, override=False)
 
 
 def _env_bool(name: str, default: bool = False) -> bool:

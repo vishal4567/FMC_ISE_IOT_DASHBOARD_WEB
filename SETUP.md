@@ -89,8 +89,10 @@ curl -sI http://localhost/ | head -1          # expect HTTP/1.1 200 (or 302)
 ```
 
 ## 6. Validate the Cisco APIs (read-only)
+The app auto-loads `.env.prod` (via python-dotenv), so no `source` is needed —
+just run:
 ```bash
-sudo -u iotdash bash -c 'set -a; source .env.prod; set +a; .venv/bin/python manage.py probe_apis --out api_responses.json'
+sudo -u iotdash .venv/bin/python manage.py probe_apis --out api_responses.json
 ```
 All rows should say `OK`. ISE timing out → flip `ISE_ERS_PORT` (443 ↔ 9060) in
 `.env.prod` and re-run. Odd fields? send `api_responses.json` for parser tuning.
@@ -98,7 +100,7 @@ All rows should say `OK`. ISE timing out → flip `ISE_ERS_PORT` (443 ↔ 9060) 
 ## 7. Seed ISE device inventory
 (also runs every 15 min via Celery beat)
 ```bash
-sudo -u iotdash bash -c 'set -a; source .env.prod; set +a; .venv/bin/python -c "import django,os;os.environ[\"DJANGO_SETTINGS_MODULE\"]=\"config.settings\";django.setup();from dashboard.tasks import poll_ise_inventory;print(poll_ise_inventory())"'
+sudo -u iotdash .venv/bin/python -c "import django,os;os.environ['DJANGO_SETTINGS_MODULE']='config.settings';django.setup();from dashboard.tasks import poll_ise_inventory;print(poll_ise_inventory())"
 # expect: {'ise_devices': N}  with N > 0
 ```
 
