@@ -41,7 +41,10 @@ class Command(BaseCommand):
         parser.add_argument("--out-dir", default="api_out",
                             help="directory for the per-probe JSON files")
         parser.add_argument("--full-endpoint", action="store_true",
-                            help="also fetch one endpoint's complete /endpoint/{id} JSON")
+                            help="(with --all) also fetch one full /endpoint/{id} JSON")
+        parser.add_argument("--all", action="store_true",
+                            help="also run the full ERS catalogue, MnT, FMC and "
+                                 "eStreamer probes (default: only Open API + location)")
 
     def handle(self, *args, **opts):
         self._out_dir = opts["out_dir"]
@@ -50,16 +53,24 @@ class Command(BaseCommand):
         self._t0 = time.perf_counter()
         self._summary = []
 
-        self._section("Cisco ISE (ERS)")
-        self._probe_ise()
+        self._init_ise()
+
+        # Default: focus on ISE Open API + device location only (clear output).
         self._section("Cisco ISE (Open API /api/v1)")
         self._probe_ise_openapi()
-        self._section("Cisco ISE (MnT)")
-        self._probe_ise_mnt()
-        self._section("Cisco FMC")
-        self._probe_fmc()
-        self._section("eStreamer")
-        self._probe_estreamer()
+        self._section("Cisco ISE (Location)")
+        self._probe_location()
+
+        # Everything else only with --all.
+        if opts["all"]:
+            self._section("Cisco ISE (ERS catalogue)")
+            self._probe_ise_ers()
+            self._section("Cisco ISE (MnT)")
+            self._probe_ise_mnt()
+            self._section("Cisco FMC")
+            self._probe_fmc()
+            self._section("eStreamer")
+            self._probe_estreamer()
 
         with open(os.path.join(self._out_dir, "_summary.json"), "w", encoding="utf-8") as f:
             json.dump(self._summary, f, indent=2, default=str)
@@ -118,8 +129,8 @@ class Command(BaseCommand):
             return f"items={len(data)}"
         return ""
 
-    # ---- ISE ERS ------------------------------------------------------------
-    def _probe_ise(self):
+    # ---- client init --------------------------------------------------------
+    def _init_ise(self):
         from dashboard import services
         try:
             self._ise = services.get_ise_client()
@@ -127,8 +138,29 @@ class Command(BaseCommand):
             self.stdout.write(self.style.ERROR(f"  ISE client init failed: {exc}"))
             self._write("ise.client", {"ok": False, "error": str(exc)})
             self._ise = None
+
+    # ---- ISE Location -------------------------------------------------------
+    def _probe_location(self):
+        """Where a device's location lives in ISE: the Network Device Group
+        hierarchy (Location tree) and the Location group on the switch/WLC (NAD)
+        the endpoint connects through; plus the MnT session that maps a device
+        MAC to that NAD."""
+        ise = getattr(self, "_ise", None)
+        if not ise:
             return
-        ise = self._ise
+        self._run("ise.location.ndg_tree",
+                  lambda: _sample(ise._ers_get("/networkdevicegroup", {"size": 100, "page": 1}), n=100))
+        self._run("ise.location.nad_full", lambda: self._full_network_device(ise))
+        mac = self._one_mac(ise)
+        if mac:
+            self._run("ise.location.session_by_mac",
+                      lambda m=mac: self._mnt(ise, f"/Session/MACAddress/{m}"))
+
+    # ---- ISE ERS catalogue (only with --all) --------------------------------
+    def _probe_ise_ers(self):
+        ise = getattr(self, "_ise", None)
+        if not ise:
+            return
         probes = {
             "ise.endpoints": ("/endpoint", {"size": 2, "page": 1}),
             "ise.endpoint_groups": ("/endpointgroup", {"size": 2, "page": 1}),
@@ -137,14 +169,9 @@ class Command(BaseCommand):
         }
         for name, (path, params) in probes.items():
             self._run(name, lambda p=path, q=params: _sample(ise._ers_get(p, q)))
-
-        # full device-type catalogue -> its own file
         self._run("ise.device_types", lambda: self._device_types(ise))
-
-        # location: NDG hierarchy + a NAD's full JSON (its Location group)
-        self._run("ise.network_device_groups",
-                  lambda: _sample(ise._ers_get("/networkdevicegroup", {"size": 100, "page": 1}), n=100))
-        self._run("ise.network_device_full", lambda: self._full_network_device(ise))
+        if self._opts.get("full_endpoint"):
+            self._run("ise.endpoint_full", lambda: self._full_endpoint(ise))
 
         if self._opts.get("full_endpoint"):
             self._run("ise.endpoint_full", lambda: self._full_endpoint(ise))
@@ -178,14 +205,17 @@ class Command(BaseCommand):
         if not ise:
             self.stdout.write("  (ISE client unavailable - skipping Open API)")
             return
-        # deployment/node reveals the ISE version; endpoint/endpoint-group show
-        # whether the richer Open API endpoint resource is available + its shape.
+        # deployment/node reveals the ISE version.
         self._run("ise.openapi.deployment_node",
                   lambda: self._openapi(ise, "/deployment/node", {}))
-        self._run("ise.openapi.endpoint",
-                  lambda: self._openapi(ise, "/endpoint", {"size": 2, "page": 1}))
+        # Fetch endpoints via the Open API — the list already carries the rich
+        # attributes inline (profileId, groupId, ipAddress, deviceType, vendor,
+        # serialNumber, custom/mdm attributes). An endpoint that is currently
+        # connected/active shows a non-null "connectedLinks".
+        self._run("ise.openapi.endpoints",
+                  lambda: self._openapi(ise, "/endpoint", {"size": 20, "page": 1}))
         self._run("ise.openapi.endpoint_group",
-                  lambda: self._openapi(ise, "/endpoint-group", {"size": 2, "page": 1}))
+                  lambda: self._openapi(ise, "/endpoint-group", {"size": 5, "page": 1}))
 
     def _openapi(self, ise, path, params):
         """ISE Open API GET. Base: https://<host>/api/v1 (always :443).
