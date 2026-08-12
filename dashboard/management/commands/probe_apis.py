@@ -142,6 +142,13 @@ class Command(BaseCommand):
                 _json.dump(res["sample"], f, indent=2)
             self.stdout.write(self.style.SUCCESS(f"     ↳ wrote {path}"))
 
+        # --- location: NDG hierarchy + a NAD's full JSON (Location group) ---
+        out["network_device_groups"] = self._run(
+            "ise.network_device_groups",
+            lambda: _sample(ise._ers_get("/networkdevicegroup", {"size": 100, "page": 1}), n=100))
+        out["network_device_full"] = self._run(
+            "ise.network_device_full", lambda: self._full_network_device(ise))
+
         # --- one full endpoint JSON (all attributes) ---
         if self._opts.get("full_endpoint"):
             out["endpoint_full"] = self._run("ise.endpoint_full",
@@ -165,6 +172,16 @@ class Command(BaseCommand):
         if not res:
             return {"note": "no endpoints"}
         return ise._ers_get(f"/endpoint/{res[0]['id']}")   # untrimmed, full detail
+
+    def _full_network_device(self, ise):
+        """Full /networkdevice/{id} JSON for the first NAD - its
+        NetworkDeviceGroupList carries the device's Location (and Device Type)
+        network-device-group values, e.g. 'Location#All Locations#Pune#Bldg-A'."""
+        lst = ise._ers_get("/networkdevice", {"size": 1, "page": 1})
+        res = (lst.get("SearchResult", {}) or {}).get("resources", [])
+        if not res:
+            return {"note": "no network devices"}
+        return ise._ers_get(f"/networkdevice/{res[0]['id']}")
 
     # ---- FMC ----------------------------------------------------------------
     def _probe_fmc(self, out):
