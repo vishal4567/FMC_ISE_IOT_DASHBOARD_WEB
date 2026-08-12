@@ -84,12 +84,25 @@ can log in to their web UIs.
 
 ## Phase 3 — Place the code + configure
 
+Get the code onto the RHEL host — **clone from GitHub** (recommended, so updates
+are a `git pull`) or copy via `rsync`/`scp`.
+
 ```bash
 sudo mkdir -p /opt/iotdash && sudo chown "$USER" /opt/iotdash
-# copy this folder's contents into /opt/iotdash  (git clone / rsync / scp)
+
+# Option A — clone from GitHub (see Appendix A for auth setup)
+git clone https://github.com/vishal4567/FMC_ISE_IOT_DASHBOARD_WEB.git /opt/iotdash
+#   private repo over HTTPS → Git prompts for username + a Personal Access Token
+#   or use SSH:  git clone git@github.com:vishal4567/FMC_ISE_IOT_DASHBOARD_WEB.git /opt/iotdash
+
+# Option B — copy from your workstation
+#   rsync -av --exclude '.venv' --exclude '.env*' ./ user@rhel-host:/opt/iotdash/
+
 cd /opt/iotdash
 cp .env.prod.example .env.prod
 ```
+> **Never** commit `.env.prod` or `client.pkcs12` — they're already git-ignored.
+> Secrets live only on the host, not in the repo.
 
 Edit **`/opt/iotdash/.env.prod`**:
 ```ini
@@ -274,3 +287,65 @@ sudo -u iotdash .venv/bin/celery -A config call dashboard.tasks.rollup_hourly
 
 Accounts/certs: ISE ERS (read-only) · FMC REST (read-only) · FMC eStreamer
 **pkcs12** client cert · dashboard **TLS** cert.
+
+---
+
+## Appendix A — Source control (GitHub)
+
+Repo: **https://github.com/vishal4567/FMC_ISE_IOT_DASHBOARD_WEB**
+
+### A.1 First-time push (publish this build)
+The project is already a git repo (`main`, secrets git-ignored). Point it at
+GitHub and push:
+
+```bash
+cd /opt/iotdash          # or your working copy
+git remote add origin https://github.com/vishal4567/FMC_ISE_IOT_DASHBOARD_WEB.git
+git branch -M main
+git push -u origin main
+```
+If the GitHub repo was created **with** a README/.gitignore, reconcile first:
+```bash
+git pull --rebase origin main
+git push -u origin main
+```
+
+### A.2 Authentication (pick one — GitHub no longer accepts passwords)
+| Method | Setup | Notes |
+|---|---|---|
+| **HTTPS + PAT** | GitHub → Settings → Developer settings → **Personal Access Token** (scope `repo`). On `git push`, enter your **username** + paste the **PAT as the password**. | Cache it: `git config --global credential.helper store` (or Git Credential Manager on Windows). |
+| **SSH key** | `ssh-keygen -t ed25519 -C you@org`; add the **public** key to GitHub → Settings → **SSH keys**; test `ssh -T git@github.com`. Use the `git@github.com:...` remote URL. | No token prompts after setup. |
+| **GitHub CLI** | `dnf install gh` (RHEL) / installer; `gh auth login`; then `gh repo create ... --push` or normal `git push`. | Easiest if you use `gh`. |
+
+> Enter your PAT into **git's own prompt / your OS credential manager** — never
+> paste it into a chat or commit it.
+
+### A.3 Set your commit author (optional)
+The initial commit is authored with a personal email. For an org repo, set your
+work identity (repo-local):
+```bash
+git config user.name  "Your Name"
+git config user.email "you@yourorg.com"
+# re-author the last commit if desired:
+git commit --amend --reset-author --no-edit
+```
+
+### A.4 Ongoing workflow
+```bash
+git add -A && git commit -m "describe change"
+git push
+# on the RHEL host, to deploy an update:
+cd /opt/iotdash && git pull && \
+  sudo -u iotdash .venv/bin/pip install -r requirements-prod.txt && \
+  sudo -u iotdash .venv/bin/python manage.py migrate && \
+  sudo -u iotdash .venv/bin/python manage.py collectstatic --noinput && \
+  sudo systemctl restart iotdash-web iotdash-worker iotdash-beat iotdash-estreamer
+```
+
+### A.5 What's kept out of git (safety)
+`.env` / `.env.prod` · `client.pkcs12` / `*.pem` / `*.key` · `api_responses.json`
+· `*.jsonl` captures · `db.sqlite3` · `.venv/` · `staticfiles/`. Verify anytime:
+```bash
+git check-ignore -v .env.prod client.pkcs12 api_responses.json
+git ls-files | grep -Ei 'env\.prod|pkcs12|\.key$' || echo "clean - no secrets tracked"
+```
