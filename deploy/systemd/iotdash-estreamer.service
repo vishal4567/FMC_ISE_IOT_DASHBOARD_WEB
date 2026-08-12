@@ -9,9 +9,12 @@ Wants=network-online.target
 Type=simple
 User=iotdash
 Group=iotdash
-WorkingDirectory=/opt/iotdash
+# eNcore uses RELATIVE paths internally (./estreamer/..., default.conf), so it
+# must run from its own dir. cd there for encore; use absolute paths for the
+# ingester (manage.py finds `config` via its own dir regardless of cwd).
+WorkingDirectory=/opt/eStreamer-eNcore
 EnvironmentFile=/opt/iotdash/.env.prod
-ExecStart=/bin/bash -lc 'bash /opt/eStreamer-eNcore/encore.sh foreground | /opt/iotdash/.venv/bin/python manage.py estreamer_ingest --source stdin'
+ExecStart=/bin/bash -lc 'cd /opt/eStreamer-eNcore && bash encore.sh foreground | /opt/iotdash/.venv/bin/python /opt/iotdash/manage.py estreamer_ingest --source stdin'
 Restart=always
 RestartSec=10
 
