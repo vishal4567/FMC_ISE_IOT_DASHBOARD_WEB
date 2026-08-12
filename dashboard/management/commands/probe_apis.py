@@ -4,10 +4,9 @@ API probe / diagnostic harness.
     python manage.py probe_apis --out api_responses.json
 
 Hits every ISE and FMC API the app uses (plus an eStreamer connectivity check),
-records status / timing / row-count and a small **raw sample** of each response,
-and writes it all to a JSON file. Hand that file back to tune the client field
-mappings (ISE endpoint attrs, FMC event/config fields, eStreamer mapping) to
-your environment.
+printing each result **live as it runs**, records status / timing / row-count and
+a small **raw sample** of each response, and writes it all to a JSON file. Hand
+that file back to tune the client field mappings to your environment.
 
 Nothing is modified - all calls are read-only.
 """
@@ -15,9 +14,6 @@ import json
 import time
 
 from django.core.management.base import BaseCommand
-
-from dashboard import services
-from dashboard.estreamer import collector
 
 
 def _sample(obj, container_keys=("resources", "items"), n=2):
@@ -43,22 +39,76 @@ class Command(BaseCommand):
         parser.add_argument("--out", default="api_responses.json")
 
     def handle(self, *args, **opts):
+        self._t0 = time.perf_counter()
+        self._ok = 0
+        self._err = 0
         report = {"ise": {}, "fmc": {}, "estreamer": {}}
 
+        self._section("Cisco ISE")
         self._probe_ise(report["ise"])
+        self._section("Cisco FMC")
         self._probe_fmc(report["fmc"])
+        self._section("eStreamer")
         self._probe_estreamer(report["estreamer"])
 
         with open(opts["out"], "w", encoding="utf-8") as f:
             json.dump(report, f, indent=2, default=str)
-        self.stdout.write(self.style.SUCCESS(f"\nWrote {opts['out']}"))
-        self._summary(report)
+
+        elapsed = round(time.perf_counter() - self._t0, 1)
+        self.stdout.write("")
+        self.stdout.write(self.style.SUCCESS(
+            f"Done in {elapsed}s — {self._ok} OK, {self._err} error(s). "
+            f"Wrote {opts['out']}"))
+        if self._err:
+            self.stdout.write(self.style.WARNING(
+                "Review the ERR lines above and the output file; send it back "
+                "for parser tuning."))
+
+    # ---- live-printing runner ----------------------------------------------
+    def _section(self, title):
+        self.stdout.write("")
+        self.stdout.write(self.style.MIGRATE_HEADING(f"=== {title} ==="))
+
+    def _run(self, name, fn):
+        """Run one probe, printing a live line before and after."""
+        # 'before' line (no newline) so a slow/hanging call is visible.
+        self.stdout.write(f"  → {name:22} ... ", ending="")
+        self.stdout.flush()
+        start = time.perf_counter()
+        try:
+            data = fn()
+            secs = round(time.perf_counter() - start, 2)
+            self._ok += 1
+            n = self._count(data)
+            self.stdout.write(self.style.SUCCESS(f"OK   {secs:>6}s  {n}"))
+            return {"ok": True, "seconds": secs, "sample": data}
+        except Exception as exc:
+            secs = round(time.perf_counter() - start, 2)
+            self._err += 1
+            self.stdout.write(self.style.ERROR(f"ERR  {secs:>6}s  {str(exc)[:80]}"))
+            return {"ok": False, "seconds": secs, "error": str(exc)}
+
+    @staticmethod
+    def _count(data):
+        if isinstance(data, dict):
+            sr = data.get("SearchResult") or {}
+            if "total" in sr:
+                return f"total={sr['total']}"
+            if "_total_in_container" in data:
+                return f"items={data['_total_in_container']}"
+            if "paging" in data:
+                return f"count={data.get('paging', {}).get('count', '?')}"
+        if isinstance(data, list):
+            return f"items={len(data)}"
+        return ""
 
     # ---- ISE ----------------------------------------------------------------
     def _probe_ise(self, out):
+        from dashboard import services
         try:
             ise = services.get_ise_client()
         except Exception as exc:
+            self.stdout.write(self.style.ERROR(f"  ISE client init failed: {exc}"))
             out["_client"] = {"ok": False, "error": str(exc)}
             return
         probes = {
@@ -68,19 +118,27 @@ class Command(BaseCommand):
             "profiler_profiles": ("/profilerprofile", {"size": 2, "page": 1}),
         }
         for name, (path, params) in probes.items():
-            out[name] = self._timed(lambda: _sample(ise._ers_get(path, params)))
-        # MnT sessions (XML) - capture raw text head
-        out["mnt_sessions"] = self._timed(
-            lambda: ise.get_active_sessions()[:2], is_list=True
-        )
+            out[name] = self._run(f"ise.{name}",
+                                   lambda p=path, q=params: _sample(ise._ers_get(p, q)))
+        out["mnt_sessions"] = self._run("ise.mnt_sessions",
+                                        lambda: ise.get_active_sessions()[:2])
 
     # ---- FMC ----------------------------------------------------------------
     def _probe_fmc(self, out):
+        from dashboard import services
         try:
             fmc = services.get_fmc_client()
+            self.stdout.write("  → fmc.auth              ... ", ending="")
+            self.stdout.flush()
+            t = time.perf_counter()
             fmc.login()
+            self.stdout.write(self.style.SUCCESS(
+                f"OK   {round(time.perf_counter()-t,2):>6}s  domain={fmc.domain_uuid}"))
+            self._ok += 1
             out["_auth"] = {"ok": True, "domain": fmc.domain_uuid, "domains": fmc.domains}
         except Exception as exc:
+            self.stdout.write(self.style.ERROR(f"ERR  {str(exc)[:80]}"))
+            self._err += 1
             out["_auth"] = {"ok": False, "error": str(exc)}
             return
         d = fmc.domain_uuid
@@ -96,55 +154,37 @@ class Command(BaseCommand):
             "audit_records": (f"{plat}/audit/auditrecords", {"limit": 2, "expanded": "true"}),
         }
         for name, (path, params) in probes.items():
-            out[name] = self._timed(lambda p=path, q=params: _sample(fmc._get(p, q)))
+            out[name] = self._run(f"fmc.{name}",
+                                  lambda p=path, q=params: _sample(fmc._get(p, q)))
         # one policy's access rules (to see rule/zone field names)
-        try:
-            pols = fmc._get(f"{cfg}/policy/accesspolicies", {"limit": 1}).get("items", [])
-            if pols:
-                pid = pols[0]["id"]
-                out["access_rules"] = self._timed(
-                    lambda: _sample(fmc._get(
-                        f"{cfg}/policy/accesspolicies/{pid}/accessrules",
-                        {"limit": 2, "expanded": "true"}))
-                )
-        except Exception as exc:
-            out["access_rules"] = {"ok": False, "error": str(exc)}
+        out["access_rules"] = self._run("fmc.access_rules",
+                                        lambda: self._fmc_rules(fmc, cfg))
+
+    @staticmethod
+    def _fmc_rules(fmc, cfg):
+        pols = fmc._get(f"{cfg}/policy/accesspolicies", {"limit": 1}).get("items", [])
+        if not pols:
+            return {"note": "no access policies"}
+        pid = pols[0]["id"]
+        return _sample(fmc._get(
+            f"{cfg}/policy/accesspolicies/{pid}/accessrules",
+            {"limit": 2, "expanded": "true"}))
 
     # ---- eStreamer ----------------------------------------------------------
     def _probe_estreamer(self, out):
         import os
         from django.conf import settings
+        from dashboard.estreamer import collector
 
         host = settings.FMC["HOST"]
         cert = os.environ.get("ESTREAMER_PKCS12", "")
         if not host:
+            self.stdout.write("  → estreamer.tcp8302     ... skipped (FMC_HOST not set)")
             out["_note"] = "FMC_HOST not set - skipped"
             return
-        out["connectivity"] = self._timed(
-            lambda: collector.check_connectivity(host, 8302, cert), is_list=False
-        )
+        out["connectivity"] = self._run(
+            "estreamer.tcp8302",
+            lambda: collector.check_connectivity(host, 8302, cert))
         out["_note"] = ("eStreamer events require the eNcore collector piped into "
                         "`manage.py estreamer_ingest`. This is a TCP/TLS reachability "
                         "check only.")
-
-    # ---- helpers ------------------------------------------------------------
-    def _timed(self, fn, is_list=False):
-        start = time.perf_counter()
-        try:
-            data = fn()
-            return {"ok": True, "seconds": round(time.perf_counter() - start, 2),
-                    "sample": data}
-        except Exception as exc:
-            return {"ok": False, "seconds": round(time.perf_counter() - start, 2),
-                    "error": str(exc)}
-
-    def _summary(self, report):
-        self.stdout.write("\n=== probe summary ===")
-        for src, section in report.items():
-            for name, res in section.items():
-                if not isinstance(res, dict):
-                    continue
-                status = "OK " if res.get("ok") else "ERR"
-                secs = res.get("seconds", "")
-                extra = res.get("error", "")[:60]
-                self.stdout.write(f"  [{status}] {src}.{name:20} {secs}s {extra}")
