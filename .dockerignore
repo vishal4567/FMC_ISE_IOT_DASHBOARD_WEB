@@ -1,0 +1,38 @@
+# Secrets & local env — never bake into an image
+.env
+.env.prod
+*.pkcs12
+*.pem
+*.key
+*.cert
+
+# Python / virtualenv
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Local DB / captures / probe output
+db.sqlite3
+*.jsonl
+api_out/
+api_responses.json
+device_types.json
+encore-sample*
+
+# Build/static artifacts (regenerated in-image)
+staticfiles/
+
+# VCS / editor / OS
+.git/
+.gitignore
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Docs & CI not needed at runtime
+*.md
+docs/

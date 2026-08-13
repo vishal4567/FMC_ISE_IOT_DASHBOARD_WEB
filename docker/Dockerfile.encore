@@ -1,0 +1,32 @@
+# eNcore + this app in ONE image, for the estreamer ingestion service.
+#
+# Builds FROM the app image (iotdash:latest), so run `docker compose build`
+# (which tags iotdash:latest) BEFORE `docker compose --profile estreamer build`.
+# Because it layers on the app image, a code change is picked up by rebuilding
+# both images.
+#
+# Runtime: eNcore streams FMC eStreamer -> JSON on stdout, piped straight into
+# the Django ingester. The base image's entrypoint still waits for Postgres.
+FROM iotdash:latest
+
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git ca-certificates openssl \
+    && rm -rf /var/lib/apt/lists/*
+
+# pyOpenSSL lets eNcore auto-convert the mounted pkcs12 at runtime (no manual
+# openssl step needed).
+RUN pip install --no-cache-dir pyOpenSSL
+
+# Cisco eNcore (reference eStreamer client). Pin/replace the repo as needed.
+RUN git clone --depth 1 \
+        https://github.com/CiscoSecurity/fp-05-microsoft-sentinel-connector.git \
+        /opt/eStreamer-eNcore \
+    && sed -i 's/\r$//' /opt/eStreamer-eNcore/encore.sh \
+    && chmod +x /opt/eStreamer-eNcore/encore.sh \
+    && chown -R appuser /opt/eStreamer-eNcore
+
+USER appuser
+# WORKDIR stays /app so the base ENTRYPOINT (./docker/entrypoint.sh) resolves and
+# waits for Postgres; the command cd's into eNcore for its relative paths.
+CMD ["bash", "-lc", "cd /opt/eStreamer-eNcore && bash encore.sh foreground | python /app/manage.py estreamer_ingest --source stdin"]
