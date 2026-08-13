@@ -237,8 +237,9 @@ ISE = {
     # Open-API-path only: backfill the (blank) device type from ERS
     # mfcAttributes. Ignored by the ERS path, which always reads mfcAttributes.
     "ERS_ENRICH": _env_bool("ISE_ERS_ENRICH", True),
-    # ERS-path only: logical profiles to filter by (undocumented ERS filter;
-    # blank -> filter by profileId). Ignored when USE_OPENAPI is True.
+    # ERS-path only: filter by logicalProfileName instead of profileId. Both are
+    # documented ERS endpoint filters; logical is fewer calls (3 vs 21). Blank ->
+    # filter by profileId. Ignored when USE_OPENAPI is True.
     "IOT_LOGICAL_PROFILES": [
         p.strip()
         for p in os.environ.get("ISE_IOT_LOGICAL_PROFILES", "").split(",")
