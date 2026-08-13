@@ -1,3 +1,6 @@
-Django>=5.0,<6.0
+# Django 4.2 LTS: supports PostgreSQL 12+ (RHEL 9 ships PG13 by default), so no
+# newer-PG module stream is required. We use no Django-5-only APIs. Bump to
+# >=5.0 only if you're on PostgreSQL 14+.
+Django>=4.2,<5.0
 requests>=2.31
 python-dotenv>=1.0

@@ -8,9 +8,11 @@ DB_NAME="${POSTGRES_DB:-iotdash}"
 DB_USER="${POSTGRES_USER:-iotdash}"
 DB_PASS="${POSTGRES_PASSWORD:-CHANGE_ME}"
 
-# Django 5 requires PostgreSQL >= 14, but RHEL 9's DEFAULT module stream is 13.
-# Enable a newer stream (16 by default; override with PG_STREAM=15) before install.
-PG_STREAM="${PG_STREAM:-16}"
+# PostgreSQL stream. This build pins Django 4.2 LTS, which supports PG12+, so the
+# RHEL 9 DEFAULT stream (13) is fine and is the one most internal mirrors carry.
+# Override with PG_STREAM=15/16 only if that stream is mirrored AND you also bump
+# Django to >=5 in requirements.txt.
+PG_STREAM="${PG_STREAM:-13}"
 echo "==> Enabling PostgreSQL ${PG_STREAM} module stream"
 sudo dnf -y module reset postgresql || true
 sudo dnf -y module enable "postgresql:${PG_STREAM}" || true
