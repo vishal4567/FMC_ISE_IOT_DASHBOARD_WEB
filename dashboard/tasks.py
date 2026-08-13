@@ -210,19 +210,19 @@ def sync_iot_endpoints() -> dict:
 # Location helpers (subnet method)
 # --------------------------------------------------------------------------- #
 def _resolve_site(ise, row, method, nad_map, subnets):
-    """Fill row['site'] (and row['ip'] if empty) per the location method.
-    subnet: uses the endpoint IP (Open API gives it inline; else a session
-    lookup). session: MnT session -> NAS IP -> NAD Location map."""
-    if method == "off":
-        return
+    """Fill row['ip'] and row['site']. The device IP is always captured (from
+    the ISE session) because it's the bridge that lets IP-based FMC/eStreamer
+    events be attributed to this device. Site is derived per method:
+    session -> NAS IP/name -> NAD Location; subnet -> IP -> CIDR; off -> IP only.
+    A session is fetched whenever we need the NAS (session method) or the IP is
+    not already known."""
+    need_session = (method == "session") or (not row.get("ip"))
+    sess = ise.session_by_mac(row["mac"]) if need_session else {}
+    if not row.get("ip"):
+        row["ip"] = sess.get("framed_ip_address", "")
     if method == "subnet":
-        if not row.get("ip"):
-            row["ip"] = ise.session_by_mac(row["mac"]).get("framed_ip_address", "")
         row["site"] = _site_for_ip(row.get("ip", ""), subnets)
-        return
-    if method == "session":
-        sess = ise.session_by_mac(row["mac"])
-        row["ip"] = row.get("ip") or sess.get("framed_ip_address", "")
+    elif method == "session":
         # Match the NAD by IP, then by name (sessions report one or the other).
         for k in ("nas_ip_address", "nas_ip", "network_device_name",
                   "nas_identifier", "acs_server"):

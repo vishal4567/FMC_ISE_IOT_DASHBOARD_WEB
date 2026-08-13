@@ -39,6 +39,25 @@ which maps to that NAD's `Location#All Locations#<site>` group. This is exactly
 how ISE's own Context Visibility "Location" column is populated. NADs that are
 tagged only at the `Location#All Locations` root yield a blank site (honest).
 
+## Correlating FMC events to ISE devices (identity, then activity)
+
+The dashboard's identity for a device — **device type + location** — always comes
+from **ISE**, keyed by MAC. FMC then supplies the **activity** (threats,
+connections, policy hits) for those same devices. The catch: ISE keys by MAC,
+FMC/eStreamer events are **IP-based**. The bridge is the **device IP that ISE
+reports in the session** (`framed_ip_address`), stored on `IoTDevice.ip`.
+
+At ingest, each FMC event is attributed to a device by:
+1. **MAC** — if the eStreamer record carries one (`enrich_with_ise` → MAC map);
+2. otherwise **IP** — the event's device/source/dest IP is looked up in the ISE
+   IP map (`IoTDevice.ip`), and the event inherits that device's MAC, device
+   type and site (`in_ise=True`).
+
+Events that match neither are kept but flagged **FMC-only** (`in_ise=False`), so
+the correlation view can show matched vs. unmatched. Because the device IP is
+essential for this bridge, the hourly sync **always** captures it from the
+session, regardless of the location method.
+
 ## Two cadences (Celery beat)
 
 | Task | Interval | Work |

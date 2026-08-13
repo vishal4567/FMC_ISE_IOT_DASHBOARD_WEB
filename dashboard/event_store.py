@@ -48,19 +48,48 @@ def ise_identity_map() -> dict:
     """{MAC -> IoTDevice} from the ISE-derived inventory, for event enrichment."""
     from dashboard.models import IoTDevice
 
-    return {d.mac: d for d in IoTDevice.objects.all()}
+    return {d.mac.upper(): d for d in IoTDevice.objects.all() if d.mac}
 
 
-def enrich_with_ise(event: dict, ise_map: dict) -> dict:
-    """Stamp ISE identity (device_type / site / in_ise) onto an event in place,
-    keyed by the device MAC. Unknown MACs are flagged FMC-only (in_ise=False)."""
-    ise = ise_map.get((event.get("device_mac") or "").upper())
+def ise_ip_map() -> dict:
+    """{IP -> IoTDevice}. ISE identifies devices by MAC, but FMC/eStreamer events
+    are IP-based - this map (device IP from the ISE session) is the bridge that
+    lets an FMC event be attributed to the right ISE device."""
+    from dashboard.models import IoTDevice
+
+    out = {}
+    for d in IoTDevice.objects.all():
+        if d.ip:
+            out[str(d.ip)] = d
+    return out
+
+
+def enrich_with_ise(event: dict, ise_map: dict, ip_map: dict | None = None) -> dict:
+    """Stamp ISE identity (device_type / site / mac / in_ise) onto an event in
+    place. Match by MAC first; if the FMC event has no usable MAC, bridge by IP
+    (device/source/dest) via the ISE-supplied device IP. Unmatched events are
+    flagged FMC-only (in_ise=False)."""
+    ip_map = ip_map or {}
+    mac = (event.get("device_mac") or "").upper()
+    ise = ise_map.get(mac) if mac and mac != "NONE" else None
+    if ise is None and ip_map:
+        for ip in (event.get("device_ip"), event.get("source_ip"), event.get("dest_ip")):
+            if ip and str(ip) in ip_map:
+                ise = ip_map[str(ip)]
+                break
     if ise:
         event["in_ise"] = True
+        # Give the event the ISE MAC so per-device (Device 360) views line up,
+        # even when the FMC record only carried an IP.
+        if not mac or mac == "NONE":
+            event["device_mac"] = ise.mac
+        event["mapped_ise_mac"] = ise.mac
         event["device_type"] = event.get("device_type") or ise.device_type
         event["site"] = event.get("site") or ise.site
         if not event.get("hostname"):
             event["hostname"] = ise.hostname
+        if not event.get("device_ip") and ise.ip:
+            event["device_ip"] = str(ise.ip)
     else:
         event["in_ise"] = False
         event.setdefault("device_type", "")

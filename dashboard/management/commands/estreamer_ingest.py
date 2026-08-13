@@ -63,6 +63,7 @@ class Command(BaseCommand):
             capture_file = open(opts["capture"], "w", encoding="utf-8")
 
         ise_map = event_store.ise_identity_map()
+        ip_map = event_store.ise_ip_map()
         batch, total, captured = [], 0, 0
         last_refresh = time.time()
 
@@ -87,7 +88,7 @@ class Command(BaseCommand):
                     continue  # don't touch the DB in capture-only mode
 
                 ev = mapping.map_event(raw)
-                event_store.enrich_with_ise(ev, ise_map)
+                event_store.enrich_with_ise(ev, ise_map, ip_map)
                 batch.append(ev)
 
                 if len(batch) >= opts["batch"]:
@@ -97,6 +98,7 @@ class Command(BaseCommand):
 
                 if time.time() - last_refresh > 300:
                     ise_map = event_store.ise_identity_map()
+                    ip_map = event_store.ise_ip_map()
                     last_refresh = time.time()
         finally:
             if opts["source"] == "file":
