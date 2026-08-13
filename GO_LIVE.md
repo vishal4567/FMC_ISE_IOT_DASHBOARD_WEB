@@ -1,251 +1,228 @@
-# GO-LIVE — clean up the existing prod build and cut over to this one
+# GO-LIVE — clean up the old build and deploy this one (systemd / RHEL 9.8)
 
-Runbook for hosts that **already run an earlier build** of this app. This is a
-**clean-slate cutover — no backups**: it stops the old stack, **wipes all old
-data** (database, Redis, containers, images), deploys this build fresh, seeds
-everything from ISE/FMC, and verifies. All app data is regenerated, so losing the
-old data is intentional and safe.
+Runbook for a host that **already ran an earlier build**, deployed the **systemd**
+way (no Docker): the app runs in a Python venv under systemd, with
+**system-installed** PostgreSQL, Redis and nginx. This is a **clean-slate cutover
+— no backups**: stop the old app, wipe all old data (DB, Redis, artifacts),
+deploy this build, seed from ISE/FMC, verify.
 
-Deep-dive docs: [DOCKER.md](DOCKER.md) · [SETUP.md](SETUP.md) ·
+Deep-dive docs: [SETUP.md](SETUP.md) · [SETUP_GUIDE.md](SETUP_GUIDE.md) ·
 [ESTREAMER_SETUP.md](ESTREAMER_SETUP.md) · [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md).
 
 Repo: `https://github.com/vishal4567/FMC_ISE_IOT_DASHBOARD_WEB` · branch `main` · tag `v1.0.0`
 
----
-
-## 0. What changes vs. the previous build (why the cleanup)
-
-| Area | Old build | This build → cleanup implication |
-|---|---|---|
-| DB | had a SQLite fallback | **Postgres only** — drop any `db.sqlite3` |
-| ISE poll | `poll_ise_inventory` every 15 min | retired → `sync_iot_endpoints` (hourly) + `refresh_ise_reference` (daily) |
-| Web reads | called ISE/FMC live + Redis cache | **DB-only**; new `Snapshot` table (migration `0002`) — flush stale Redis keys |
-| Device type / site | custom-attr guess | `mfcAttributes` + NAD Location — **re-sync `IoTDevice`** |
-| eNcore state | may be root-owned from manual runs | purge bookmarks/cache, fix ownership |
-
-**Golden rule (unchanged):** web reads only the DB. Cutover order is
-**stop → clean → deploy → migrate → re-seed → verify.**
-
-Use ONE path per host — **Docker** (§ marked A) or **systemd** (§ marked B).
-Command prefixes for the seed/verify steps:
-- Docker:  `docker compose run --rm web python manage.py …`
-- systemd: `sudo -u iotdash /opt/iotdash/.venv/bin/python manage.py …`
+Every `manage.py` command below uses the venv + `.env.prod`:
+```bash
+RUN="sudo -u iotdash /opt/iotdash/.venv/bin/python manage.py"
+```
 
 ---
 
-## 1. Clean slate — no backups
+## 0. What this does, and the one rule
 
-You want the old build's data **gone**. Nothing is preserved: the database,
-Redis, containers, images and artifacts are all wiped in §3, and the new build
-re-seeds everything from ISE/FMC. All app data (inventory, snapshots, events) is
-regenerated — losing it is expected and safe.
+```
+ISE  ──REST──►  sync_iot_endpoints ─► IoTDevice (device type + site + IP)
+ISE/FMC ─REST─► snapshot_datasets  ─► Snapshot table          ┐
+FMC ─eStreamer(8302)─► eNcore ─► estreamer_ingest ─► SecurityEvent │─► PostgreSQL ─► gunicorn ─► nginx
+                                                                     Redis · Celery worker+beat (systemd)
+```
 
-The only things to keep are the ones that aren't "old build data" and aren't in
-git — your **`.env.prod`** and **`client.pkcs12`**. Leave them in `/opt/iotdash`;
-the cleanup and git steps do not touch them. (Grab a copy elsewhere only if you
-want to be able to reconfigure without re-entering values.)
+**Rule:** the web tier reads **only the database**. Cutover order is
+**stop → wipe → deploy → migrate → seed → verify.** All app data is regenerated
+from ISE/FMC, so discarding the old data is safe.
 
-> **Note — there is no system `postgresql` service.** Postgres is the Docker
-> Compose `postgres` container (data in the `iotdash_pgdata` volume). The wipe in
-> §3 removes that volume; a fresh empty DB is created when you bring the stack up.
+Keep only `/opt/iotdash/.env.prod` and `client.pkcs12` (config, not "old data",
+not in git). Everything else is rebuilt.
 
 ---
 
-## 2. Stop the existing app
+## 1. Stop the old app
 
-**A — Docker**
+```bash
+sudo systemctl stop iotdash-web iotdash-worker iotdash-beat iotdash-estreamer 2>/dev/null || true
+```
+
+---
+
+## 2. Wipe all old data + remnants
+
+### 2a. App artifacts, eNcore state, Redis, stale units (cleanup.sh)
+Dry-run first (it never touches `.env.prod`/cert):
 ```bash
 cd /opt/iotdash
-docker compose --profile estreamer down --remove-orphans     # keeps volumes (DB safe)
+bash deploy/cleanup.sh --systemd --artifacts --encore --cache        # PREVIEW
+bash deploy/cleanup.sh --systemd --artifacts --encore --cache --yes  # APPLY
 ```
+This removes the `iotdash-*` unit files, pyc/staticfiles/legacy `db.sqlite3`,
+eNcore bookmarks/cache/logs, and flushes Redis (the old build cached live results
+there — stale under the DB-only model).
 
-**B — systemd**
+### 2b. Drop the database (this is the "remove all old data" step)
+The installer recreates it empty in §4.
 ```bash
-sudo systemctl stop iotdash-web iotdash-worker iotdash-beat iotdash-estreamer
+sudo -u postgres psql -c "DROP DATABASE IF EXISTS iotdash;"
+# (leave the iotdash role; the installer reuses it)
+```
+> If PostgreSQL isn't installed yet (truly first deploy), skip 2b — there's
+> nothing to drop; §4 installs and creates it fresh.
+
+### 2c. (optional) rebuild the venv from scratch
+```bash
+sudo rm -rf /opt/iotdash/.venv
 ```
 
 ---
 
-## 3. Purge EVERYTHING from the old build
-
-Uses the repo's [deploy/cleanup.sh](deploy/cleanup.sh) — **dry-run by default**;
-`.env.prod` and certs are never touched. `--data` adds the destructive DB/volume
-wipe you want here.
-
-```bash
-cd /opt/iotdash
-bash deploy/cleanup.sh --all --data            # PREVIEW the full wipe (incl. DB)
-bash deploy/cleanup.sh --all --data --yes      # DO IT: compose down -v (removes the
-                                               #   postgres volume + all data), images,
-                                               #   Redis flush, artifacts, legacy sqlite,
-                                               #   eNcore state
-```
-This removes the database volume, Redis contents, containers, images, build
-artifacts and eNcore state — a true clean slate. `.env.prod` and `client.pkcs12`
-survive.
-
-Retired systemd units, if any old ones linger from a prior layout:
-```bash
-systemctl list-unit-files | grep iotdash    # anything not in deploy/systemd/ is stale
-# for each stale one:  sudo systemctl disable --now <unit>; sudo rm /etc/systemd/system/<unit>
-sudo systemctl daemon-reload
-```
-
-Confirm the volume is gone:
-```bash
-docker volume ls | grep iotdash    # expect NO iotdash_pgdata line
-```
-
----
-
-## 4. Get this build
+## 3. Get this build
 
 ```bash
 cd /opt/iotdash
 git fetch origin --tags
-git stash push -m "prod-local $(date +%F)" 2>/dev/null || true   # set aside any local edits
+git stash push -m "prod-local $(date +%F)" 2>/dev/null || true   # set aside stray local edits
 git checkout v1.0.0                                              # or: git reset --hard origin/main
 git log --oneline -1
 ```
-If `git checkout` complains about the cert/env, that's expected — they're
-git-ignored and stay put. If a real tracked file blocks it, inspect
-`git status`; your edits are in the stash.
+`.env.prod` and `client.pkcs12` are git-ignored and stay put.
 
 ---
 
-## 5. Reconcile `.env.prod` with this build's settings
+## 4. Install the stack + migrate (one script)
 
-Your existing `.env.prod` predates several settings. Add/confirm these (defaults
-already in `.env.prod.example` — diff against it):
+`deploy/install_rhel9.sh` installs Python 3.11 / PostgreSQL / Redis / nginx from
+**RHEL repos** (no internet registry needed), (re)creates the DB + role + venv,
+runs migrate + collectstatic, sets SELinux + firewalld, and enables the
+`iotdash-web/worker/beat` services.
 
+```bash
+cd /opt/iotdash
+POSTGRES_PASSWORD='<same value as in .env.prod>' sudo -E bash deploy/install_rhel9.sh
+```
+Because the DB was dropped in §2b, `migrate` builds **all** tables fresh (expect a
+full set of "Applying …" lines).
+
+Confirm the platform is up:
+```bash
+systemctl is-active postgresql redis nginx iotdash-web iotdash-worker iotdash-beat
+curl -sI http://localhost/ | head -1        # HTTP/1.1 200 or 302
+```
+
+---
+
+## 5. Reconcile `.env.prod` with this build
+
+Your old `.env.prod` predates several settings. Confirm these exist (defaults are
+in `.env.prod.example`):
+```ini
+POSTGRES_HOST=localhost                       # systemd path uses the local PG
+REDIS_URL=redis://localhost:6379/0
+ISE_USE_OPENAPI=False   ISE_ERS_ENRICH=True   # ERS + mfcAttributes (confirmed)
+ISE_LOCATION_METHOD=session                   # NAD Location via session (no device IP)
+ISE_ERS_PORT=443        ISE_VERIFY_TLS=True
+# optional: ISE_IOT_LOGICAL_PROFILES=Wipro_CCTV,Wipro-Access-Control,Wipro-BMS
+```
+Remove dead keys from the old build (harmless if left): `POLL_ISE_MINUTES`,
+`ISE_DETAIL_LIMIT`, `ISE_SITE_ATTR`, `ISE_DEVICE_TYPE_ATTR`.
+
+Spot what you're missing:
 ```bash
 diff <(grep -o '^[A-Z_]*' .env.prod.example | sort -u) \
-     <(grep -o '^[A-Z_]*' .env.prod        | sort -u)   # keys you're missing
+     <(grep -o '^[A-Z_]*' .env.prod        | sort -u)
 ```
-Make sure these are present:
-```ini
-ISE_USE_OPENAPI=False        ISE_ERS_ENRICH=True        # ERS + mfcAttributes (confirmed)
-ISE_LOCATION_METHOD=session  # NAD Location via the session (no device IP needed)
-ISE_ERS_PORT=443
-# optional: ISE_IOT_LOGICAL_PROFILES=Wipro_CCTV,Wipro-Access-Control,Wipro-BMS
-# schedule (optional overrides):
-ISE_REFERENCE_MINUTES=1440   IOT_SYNC_MINUTES=60   POLL_CONFIG_MINUTES=15
-```
-Remove any dead keys from the old build (harmless if left, but tidy):
-`POLL_ISE_MINUTES`, `ISE_DETAIL_LIMIT`, `ISE_SITE_ATTR`, `ISE_DEVICE_TYPE_ATTR`.
+Edited `.env.prod`? Apply it: `sudo systemctl restart iotdash-web iotdash-worker iotdash-beat`.
 
 ---
 
-## 6. Deploy + migrate
+## 6. Seed the fresh database (order matters)
 
-**A — Docker**
 ```bash
-cd /opt/iotdash
-docker compose build
-docker compose up -d                    # web entrypoint runs migrate + collectstatic
-docker compose ps                       # all healthy
-docker compose logs -f web              # watch "Applying dashboard.0002_snapshot… OK"
-```
+RUN="sudo -u iotdash /opt/iotdash/.venv/bin/python manage.py"
 
-**B — systemd**
-```bash
-cd /opt/iotdash
-sudo -u iotdash .venv/bin/pip install -r requirements-prod.txt
-sudo -u iotdash .venv/bin/python manage.py migrate            # applies 0002_snapshot (additive)
-sudo -u iotdash .venv/bin/python manage.py collectstatic --noinput
-sudo cp deploy/systemd/*.service /etc/systemd/system/ && sudo systemctl daemon-reload
-sudo systemctl restart iotdash-web iotdash-worker iotdash-beat
+$RUN probe_apis          # read-only check; confirm counts.ers_by_profileId > 0
+$RUN sync_ise            # → {'iot_endpoints': N, 'with_site': M}
+$RUN snapshot_datasets   # → Done: N datasets (E errors) + connection status
 ```
-The DB volume was wiped in §3, so `migrate` creates **all** tables fresh
-(including the Snapshot table) — expect a full set of "Applying …" lines, not
-just one.
+After this the dashboard shows real numbers. Events (W2/W4/W5) fill in from §7.
 
 ---
 
-## 7. Seed the fresh database
+## 7. FMC events via eStreamer (eNcore)
 
-The DB is empty (wiped in §3, tables created by the §6 migrate). Populate it:
-
-```bash
-# 1) validate APIs (read-only); confirm counts.ers_by_profileId > 0
-manage.py probe_apis
-
-# 2) ISE reference + IoT inventory  →  IoTDevice (device type + site + IP)
-manage.py sync_ise                # → {'iot_endpoints': N, 'with_site': M}
-
-# 3) ISE/FMC datasets + connectivity  →  Snapshot table (what the web reads)
-manage.py snapshot_datasets       # → Done: N datasets (E errors) + status
-```
+Full detail: [ESTREAMER_SETUP.md](ESTREAMER_SETUP.md).
+1. In FMC (**System → Integration → eStreamer**) create a client for THIS host's
+   IP, download `client.pkcs12`, place it at `/opt/iotdash/client.pkcs12`.
+2. Install eNcore + drop in the config (from ESTREAMER_SETUP §2–3), set the FMC IP
+   in `estreamer.conf`.
+3. Start ingestion:
+   ```bash
+   sudo systemctl enable --now iotdash-estreamer
+   journalctl -u iotdash-estreamer -f            # handshake to :8302, then "Ingested N"
+   ```
 
 ---
 
-## 8. Restart eStreamer ingestion
-
-Reuse your existing `client.pkcs12` + FMC IP in `deploy/estreamer.conf.example`.
-```bash
-# Docker:
-docker compose --profile estreamer build && docker compose --profile estreamer up -d estreamer
-docker compose logs -f estreamer
-# systemd:
-sudo systemctl restart iotdash-estreamer && journalctl -u iotdash-estreamer -f
-```
-Expect the eNcore handshake to :8302, then `Ingested N`. (The cutover reset the
-bookmark, so it resumes from now — that's fine.)
-
----
-
-## 9. Acceptance checklist
+## 8. Acceptance checklist
 
 - [ ] `curl -sI http://localhost/` → 200/302
-- [ ] **W1 (Total IoT Devices)** > 0, device types + sites look right
+- [ ] **W1 (Total IoT Devices)** > 0; device types + sites look right
 - [ ] Reports cards show counts; opening a report **lazy-loads** its table
-- [ ] `manage.py shell -c "from dashboard.models import Snapshot; print(Snapshot.objects.count())"` > 0
+- [ ] `$RUN shell -c "from dashboard.models import Snapshot; print(Snapshot.objects.count())"` > 0
 - [ ] eStreamer logs show events; W2/W4/W5 populate over time
-- [ ] Beat schedules present: daily `refresh_ise_reference`, hourly
-      `sync_iot_endpoints`, 15-min `snapshot_datasets`, rollup, purge
-- [ ] No references to `poll_ise_inventory` in `journalctl`/logs (retired)
+- [ ] `systemctl is-active postgresql redis nginx iotdash-web iotdash-worker iotdash-beat` all `active`
+- [ ] Beat schedules: daily `refresh_ise_reference`, hourly `sync_iot_endpoints`,
+      15-min `snapshot_datasets`, rollup, purge — no `poll_ise_inventory` (retired)
+
+---
+
+## 9. Day-2 operations
+
+**Ship a code change:**
+```bash
+cd /opt/iotdash && git pull
+sudo -u iotdash .venv/bin/pip install -r requirements-prod.txt
+sudo -u iotdash .venv/bin/python manage.py migrate
+sudo -u iotdash .venv/bin/python manage.py collectstatic --noinput
+sudo systemctl restart iotdash-web iotdash-worker iotdash-beat iotdash-estreamer
+```
+**Logs / status:** `journalctl -u iotdash-web -f` · `systemctl status iotdash-*`
+**Schedules** (`.env.prod`, then restart beat):
+`ISE_REFERENCE_MINUTES=1440  IOT_SYNC_MINUTES=60  POLL_CONFIG_MINUTES=15  ROLLUP_MINUTES=60  PURGE_MINUTES=720`
+**TLS:** put cert/key under `/etc/pki/tls/`, enable the 443 block in
+`/etc/nginx/conf.d/iotdash.conf`, `sudo nginx -t && sudo systemctl restart nginx`.
 
 ---
 
 ## 10. Rollback (if acceptance fails)
 
-You chose a clean slate, so there's no old DB to restore — rollback is just
-redeploying the previous code, which re-seeds itself the same way:
-
+Clean slate = no old DB to restore; roll back the code and re-seed:
 ```bash
 cd /opt/iotdash
-git checkout <previous-tag-or-commit>       # e.g. the tag before v1.0.0
-docker compose down -v                      # clear this attempt
-docker compose build && docker compose up -d
-# then re-run the §7 seed commands for that version
+git checkout <previous-tag-or-commit>
+sudo -u postgres psql -c "DROP DATABASE IF EXISTS iotdash;" \
+  && sudo -u postgres psql -c "CREATE DATABASE iotdash OWNER iotdash;"
+sudo -u iotdash .venv/bin/pip install -r requirements-prod.txt
+sudo -u iotdash .venv/bin/python manage.py migrate
+sudo systemctl restart iotdash-web iotdash-worker iotdash-beat
+# then re-run the §6 seed commands
 ```
-Because all data comes from ISE/FMC, a fresh seed rebuilds it — nothing is lost
-by rolling forward or back.
+All data comes from ISE/FMC, so a fresh seed rebuilds it.
 
 ---
 
-## 11. Post-cutover (after it's stable a day or two)
-
-```bash
-docker image prune -f                        # drop old dangling images
-git stash drop 2>/dev/null || true           # discard the §4 stash if unneeded
-```
-
----
-
-## Troubleshooting
+## 11. Troubleshooting
 
 | Symptom | Fix |
 |---|---|
-| build fails: `resolve image config for docker.io/docker/dockerfile:1` | host can't pull the BuildKit frontend; the `# syntax=` line is already removed — `git pull` this build. Fallback: `DOCKER_BUILDKIT=0 docker compose build` |
-| build fails pulling `python:3.12-slim` / alpine images | host can't reach docker.io — configure a registry mirror in `/etc/docker/daemon.json` (`"registry-mirrors"`) or `docker login <internal-registry>`, then rebuild |
-| `pg_dump` / `sudo -u postgres` fails ("no postgres service") | Postgres is the Docker `postgres` container — use `docker compose exec -T postgres pg_dump …`; if no such container, the old build was SQLite (re-seed fresh) |
-| old task still firing | restart `iotdash-beat` / `worker` — beat rebuilds its schedule on start |
-| stale numbers after cutover | `bash deploy/cleanup.sh --cache --yes` (flush Redis), reload page |
-| reports "Not collected yet" | run `snapshot_datasets` (or wait for the 15-min beat) |
+| `dnf` can't install | VM not entitled → `subscription-manager register …` (see SETUP §0) |
+| install: "database exists" | expected if you skipped §2b; the script reuses it — drop it first for a clean slate |
+| W1 = 0 | run `sync_ise`; check ERS role/reachability with `probe_apis` |
 | `ers_by_profileId` = 0 | set `ISE_IOT_LOGICAL_PROFILES=…` in `.env.prod`, re-run `sync_ise` |
-| device type blank | ensure `ISE_ERS_ENRICH=True` (default) |
-| eNcore permission denied | `sudo chown -R iotdash:iotdash /opt/eStreamer-eNcore` (see ESTREAMER_SETUP) |
-| ISE ProxyError | set `NO_PROXY=<ise>,<fmc>,10.0.0.0/8,localhost,127.0.0.1` |
+| device type blank | ensure `ISE_ERS_ENRICH=True` (default) — reads `mfcAttributes` |
+| reports "Not collected yet" | run `snapshot_datasets` (or wait for the 15-min beat) |
+| stale numbers after cutover | `bash deploy/cleanup.sh --cache --yes` (flush Redis), reload |
+| old task still firing | restart `iotdash-beat`/`worker` — beat rebuilds its schedule on start |
+| ISE ProxyError | set `NO_PROXY=<ise>,<fmc>,10.0.0.0/8,localhost,127.0.0.1` in `.env.prod` |
+| nginx 502 | `systemctl status iotdash-web`; `sudo setsebool -P httpd_can_network_connect 1` |
+| eNcore permission denied | `sudo chown -R iotdash:iotdash /opt/eStreamer-eNcore` |
+| No events | `bash /opt/eStreamer-eNcore/encore.sh test`; host→FMC:8302 open; cert host must match this VM |
 
-When in doubt: `manage.py probe_apis` then read `api_out/_summary.json`.
+When in doubt: `$RUN probe_apis` then read `api_out/_summary.json`.
