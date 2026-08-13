@@ -103,6 +103,10 @@ class Dataset:
     description: str = ""
     widget: str = ""  # which requirement widget/use-case it feeds
     columns: list = field(default_factory=list)  # optional explicit column order
+    # derived=True: computed from the local DB (event store / IoTDevice), so it's
+    # read live at request time (cheap, always fresh) and NOT snapshotted. False:
+    # external (ISE/FMC) - the scheduler snapshots it and the web reads the DB.
+    derived: bool = False
 
 
 def _ise_endpoints():
@@ -222,6 +226,7 @@ DATASETS: dict[str, Dataset] = {
             label="IoT Endpoints (ISE)",
             source="ISE",
             fetch=_ise_endpoints,
+            derived=True,   # reads the IoTDevice DB inventory
             widget="Widget 1 - Total Devices Onboarded / Asset Inventory",
             description="IoT endpoints synced from ISE (allow-listed profiles "
             "only), each with its device type, ISE profile and site. Read from "
@@ -355,6 +360,7 @@ DATASETS: dict[str, Dataset] = {
             label="FMC Events",
             source="FMC",
             fetch=_threat_events,
+            derived=True,
             widget="Events feed (intrusion/connection/malware/file/SI)",
             description="FMC event feed (intrusion / connection / malware / "
             "file / security-intelligence), grounded in real MACs, zones, "
@@ -365,6 +371,7 @@ DATASETS: dict[str, Dataset] = {
             label="IoT Devices at Risk",
             source="FMC",
             fetch=_threat_devices_at_risk,
+            derived=True,
             widget="Widget 2 - IoT Devices at Risk",
             description="Devices ranked by threat events, with ISE correlation.",
         ),
@@ -373,6 +380,7 @@ DATASETS: dict[str, Dataset] = {
             label="Insecure Data Transfer",
             source="FMC",
             fetch=_threat_insecure,
+            derived=True,
             widget="Use case 4.2 - Insecure data transfer",
             description="Events over clear-text protocols "
             "(Telnet/FTP/HTTP/SNMP/TFTP/SMBv1).",
@@ -382,6 +390,7 @@ DATASETS: dict[str, Dataset] = {
             label="Assets Outside Allowed Zone",
             source="FMC",
             fetch=_threat_outside_zone,
+            derived=True,
             widget="Use case 4.3 - Assets talking outside allowed zone",
             description="Blocked cross-zone traffic to Outside / DMZ zones.",
         ),
@@ -390,6 +399,7 @@ DATASETS: dict[str, Dataset] = {
             label="ISE â†” FMC Device Mapping",
             source="MAP",
             fetch=_threat_correlation,
+            derived=True,
             widget="ISE <-> FMC correlation",
             description="Every FMC event-device mapped to an ISE endpoint by "
             "MAC: matched (with ISE identity) vs unmatched (FMC-only).",
@@ -399,18 +409,11 @@ DATASETS: dict[str, Dataset] = {
 
 
 def ise_endpoint_count(*, use_cache: bool = True) -> int:
-    """Cheap total endpoint count for the W1 tile (one ERS call, cached)."""
-    key = "ise:endpoint_count"
-    if use_cache:
-        cached = cache.get(key)
-        if cached is not None:
-            return cached
-    try:
-        value = get_ise_client().get_endpoint_count()
-    except (ConfigError, IntegrationError):
-        value = 0
-    cache.set(key, value)
-    return value
+    """W1 tile: number of IoT devices onboarded. Reads the DB inventory
+    (IoTDevice) the hourly sync populates - no live ISE call."""
+    from dashboard.models import IoTDevice
+
+    return IoTDevice.objects.count()
 
 
 def source_enabled(source: str) -> bool:
@@ -422,37 +425,65 @@ def source_enabled(source: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# Fetch with caching + uniform error envelope
+# DB snapshot store (scheduler writes, web reads)
+#
+# The web tier NEVER calls ISE/FMC live. The Celery snapshot task fetches each
+# dataset with fetch_dataset_live() and persists it via save_snapshot(); the web
+# reads it back with fetch_dataset(). This keeps request latency to a DB read
+# and isolates the UI from ISE/FMC slowness or outages.
 # --------------------------------------------------------------------------- #
-def fetch_dataset(key: str, *, use_cache: bool = True) -> dict:
-    """Return ``{"rows", "columns", "error", "cached"}`` for a dataset.
+def save_snapshot(name: str, data: dict) -> None:
+    from django.utils import timezone
+    from dashboard.models import Snapshot
 
-    Never raises for expected integration problems - errors are captured in
-    the envelope so a single failing source degrades gracefully.
-    """
+    Snapshot.objects.update_or_create(
+        name=name, defaults={"data": data, "fetched_at": timezone.now()}
+    )
+
+
+def load_snapshot(name: str):
+    from dashboard.models import Snapshot
+
+    row = Snapshot.objects.filter(name=name).first()
+    if not row:
+        return None, None
+    return row.data, row.fetched_at
+
+
+def fetch_dataset(key: str, *, use_cache: bool = True) -> dict:
+    """DB-only read of a dataset snapshot: ``{rows, columns, error, cached,
+    fetched_at}``. Data comes from the Snapshot table the scheduler writes -
+    no live ISE/FMC call. ``use_cache`` is accepted for call-site compatibility
+    but has no effect (reads are always from the DB)."""
+    ds = DATASETS[key]
+    # DB-derived datasets (event analytics, IoTDevice inventory) read the DB
+    # directly and are cheap + always fresh - no snapshot needed.
+    if getattr(ds, "derived", False):
+        return fetch_dataset_live(key)
+
+    data, fetched_at = load_snapshot(f"dataset:{key}")
+    if data is None:
+        return {"rows": [], "columns": ds.columns, "error":
+                "Not collected yet - the scheduler will populate this shortly.",
+                "cached": True, "fetched_at": None}
+    data = dict(data)
+    data["cached"] = True
+    data["fetched_at"] = fetched_at.isoformat() if fetched_at else None
+    return data
+
+
+def fetch_dataset_live(key: str) -> dict:
+    """Hit the source (ISE/FMC or the DB analytics) for a dataset. Used by the
+    scheduler to build snapshots - NOT by the web request path for external
+    datasets. Never raises: errors are captured in the envelope."""
     ds = DATASETS[key]
     if not source_enabled(ds.source):
-        return {
-            "rows": [],
-            "columns": [],
-            "error": f"{ds.source} is disabled in configuration.",
-            "cached": False,
-        }
-
-    cache_key = f"dataset:{key}"
-    if use_cache:
-        cached = cache.get(cache_key)
-        if cached is not None:
-            cached = dict(cached)
-            cached["cached"] = True
-            return cached
-
+        return {"rows": [], "columns": [], "error":
+                f"{ds.source} is disabled in configuration.", "cached": False}
     try:
         rows = ds.fetch()
         columns = ds.columns or _infer_columns(rows)
-        payload = {"rows": rows, "columns": columns, "error": None, "cached": False}
-        cache.set(cache_key, payload)
-        return payload
+        return {"rows": rows, "columns": columns, "error": None, "cached": False}
     except ConfigError as exc:
         return {"rows": [], "columns": [], "error": str(exc), "cached": False}
     except IntegrationError as exc:
@@ -461,12 +492,24 @@ def fetch_dataset(key: str, *, use_cache: bool = True) -> dict:
             detail += f" - {exc.detail}"
         return {"rows": [], "columns": [], "error": detail, "cached": False}
     except Exception as exc:  # pragma: no cover - defensive catch-all
-        return {
-            "rows": [],
-            "columns": [],
-            "error": f"Unexpected error fetching {key}: {exc}",
-            "cached": False,
-        }
+        return {"rows": [], "columns": [], "error":
+                f"Unexpected error fetching {key}: {exc}", "cached": False}
+
+
+def snapshot_all_datasets() -> dict:
+    """Fetch every external dataset live and persist it as a DB snapshot. Called
+    by the scheduler (and the snapshot_datasets management command)."""
+    n, errors = 0, 0
+    for ds in DATASETS.values():
+        if getattr(ds, "derived", False):
+            continue  # DB-derived: read live from the DB at request time
+        payload = fetch_dataset_live(ds.key)
+        save_snapshot(f"dataset:{ds.key}", payload)
+        n += 1
+        if payload.get("error"):
+            errors += 1
+    save_snapshot("connection_status", connection_status_live())
+    return {"datasets": n, "errors": errors}
 
 
 def _infer_columns(rows: list) -> list:
@@ -484,11 +527,19 @@ def _infer_columns(rows: list) -> list:
 # Dashboard summary (counts per dataset + connectivity)
 # --------------------------------------------------------------------------- #
 def connection_status(*, use_cache: bool = True) -> dict:
-    key = "conn:status"
-    if use_cache:
-        cached = cache.get(key)
-        if cached is not None:
-            return cached
+    """DB-only: the last connectivity probe result the scheduler stored. No live
+    probe on the request path."""
+    data, _ = load_snapshot("connection_status")
+    if data:
+        return data
+    return {
+        "ISE": {"ok": None, "detail": "Not probed yet."},
+        "FMC": {"ok": None, "detail": "Not probed yet."},
+    }
+
+
+def connection_status_live(*, use_cache: bool = True) -> dict:
+    """Actually probe ISE/FMC. Called by the scheduler, not the web request."""
     status = {}
     if settings.ISE["ENABLED"]:
         try:
@@ -505,7 +556,6 @@ def connection_status(*, use_cache: bool = True) -> dict:
             status["FMC"] = {"ok": False, "detail": str(exc)}
     else:
         status["FMC"] = {"ok": None, "detail": "Disabled in configuration."}
-    cache.set(key, status, 60)  # live probes are costly; refresh at most /min
     return status
 
 

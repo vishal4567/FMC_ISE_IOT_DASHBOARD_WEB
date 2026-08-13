@@ -26,8 +26,8 @@ def setup_periodic_tasks(sender, **kwargs):
                              app.signature("dashboard.tasks.sync_iot_endpoints"),
                              name="sync IoT endpoints (hourly)")
     sender.add_periodic_task(schedule(60 * mins["config_poll"]),
-                             app.signature("dashboard.tasks.refresh_fmc_config"),
-                             name="refresh FMC config")
+                             app.signature("dashboard.tasks.snapshot_datasets"),
+                             name="snapshot ISE/FMC datasets to DB")
     sender.add_periodic_task(schedule(60 * mins["rollup"]),
                              app.signature("dashboard.tasks.rollup_hourly"),
                              name="hourly rollup")

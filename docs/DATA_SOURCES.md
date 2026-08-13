@@ -58,6 +58,24 @@ the correlation view can show matched vs. unmatched. Because the device IP is
 essential for this bridge, the hourly sync **always** captures it from the
 session, regardless of the location method.
 
+## The web tier reads only the DB
+
+No page ever calls ISE/FMC live. The **scheduler writes, the web reads**:
+
+- `sync_iot_endpoints` → `IoTDevice` (device type + site + IP)
+- `snapshot_datasets` → `Snapshot` table (every external ISE/FMC dataset + a
+  connectivity probe), as JSON, timestamped
+- eStreamer ingester → `SecurityEvent` (+ hourly rollups)
+
+At request time the app reads `IoTDevice`, `SecurityEvent`/aggregates, and
+`Snapshot` — all local Postgres. If ISE/FMC is slow or down, the dashboard still
+serves the last good snapshot instantly (with its `fetched_at`).
+
+**Numbers first, details on demand:** the dashboard renders KPI counts from the
+DB immediately; the detail tables fetch their rows lazily from a JSON endpoint
+(`/dataset/<key>.json`) after the page paints — so a big table never blocks the
+initial load.
+
 ## Two cadences (Celery beat)
 
 | Task | Interval | Work |

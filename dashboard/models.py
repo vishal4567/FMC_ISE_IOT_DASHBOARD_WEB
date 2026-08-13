@@ -114,3 +114,17 @@ class IoTDevice(models.Model):
 
     def __str__(self):
         return f"{self.mac} ({self.device_type})"
+
+
+class Snapshot(models.Model):
+    """Scheduler-written cache of external (ISE/FMC) data and status. The web
+    tier reads ONLY from here (never calls ISE/FMC live at request time); the
+    Celery ``snapshot_datasets`` task refreshes it. One row per name, e.g.
+    ``dataset:ise-network-devices`` or ``connection_status``."""
+
+    name = models.CharField(max_length=80, unique=True)
+    data = models.JSONField(default=dict)
+    fetched_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self):
+        return f"{self.name} @ {self.fetched_at}"

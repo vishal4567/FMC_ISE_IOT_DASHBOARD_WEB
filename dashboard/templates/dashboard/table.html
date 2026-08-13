@@ -1,5 +1,4 @@
 {% extends "dashboard/base.html" %}
-{% load dashboard_extras %}
 {% block title %}{{ dataset.label }}{% endblock %}
 
 {% block content %}
@@ -14,7 +13,7 @@
   <div>
     <h3 class="mb-1">
       {{ dataset.label }}
-      <span class="badge {% if dataset.source == 'ISE' %}bg-info{% else %}bg-warning text-dark{% endif %} align-middle">
+      <span class="badge {% if dataset.source == 'ISE' %}bg-info{% elif dataset.source == 'MAP' %}bg-primary{% else %}bg-warning text-dark{% endif %} align-middle">
         {{ dataset.source }}
       </span>
     </h3>
@@ -23,47 +22,78 @@
   </div>
   <div class="text-end">
     <a href="{% url 'dashboard:dataset_csv' dataset.key %}" class="btn btn-sm btn-success">⬇ Export CSV</a>
-    <a href="?refresh=1" class="btn btn-sm btn-outline-primary">↻ Refresh</a>
-    <div class="small text-muted mt-1">
-      {% if cached %}served from cache{% else %}fresh from API{% endif %}
-    </div>
+    <button id="reload" class="btn btn-sm btn-outline-primary">↻ Reload</button>
+    <div id="meta" class="small text-muted mt-1"></div>
   </div>
 </div>
 
-{% if error %}
-  <div class="alert alert-danger">
-    <strong>Could not fetch this dataset.</strong><br>{{ error }}
-  </div>
-{% elif not rows %}
-  <div class="alert alert-secondary">No records returned.</div>
-{% else %}
-  <div class="mb-2 text-muted small">{{ rows|length }} record(s)</div>
-  <div class="table-responsive">
-    <table id="data-table" class="table table-sm table-striped table-hover align-middle w-100">
-      <thead class="table-dark">
-        <tr>{% for col in columns %}<th>{{ col }}</th>{% endfor %}</tr>
-      </thead>
-      <tbody>
-        {% for row in rows %}
-        <tr>
-          {% for col in columns %}<td>{{ row|dictkey:col }}</td>{% endfor %}
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-{% endif %}
+<!-- The page paints immediately; rows arrive from the JSON API below. -->
+<div id="status" class="alert alert-secondary">
+  <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+  Loading data…
+</div>
+
+<div id="table-wrap" class="table-responsive d-none">
+  <div class="mb-2 text-muted small"><span id="rowcount">0</span> record(s)</div>
+  <table id="data-table" class="table table-sm table-striped table-hover align-middle w-100">
+    <thead class="table-dark"><tr id="thead-row"></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  $(function () {
-    $('#data-table').DataTable({
-      pageLength: 25,
-      lengthMenu: [10, 25, 50, 100],
-      order: [],
-      language: { search: "Search (MAC / IP / hostname / type):" }
-    });
-  });
+  const DATA_URL = "{% url 'dashboard:dataset_json' dataset.key %}";
+  let dt = null;
+
+  function esc(v) {
+    if (v === null || v === undefined) return "";
+    if (typeof v === "object") v = JSON.stringify(v);
+    return String(v).replace(/[&<>"]/g, c =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  function load() {
+    const $status = $("#status"), $wrap = $("#table-wrap");
+    $wrap.addClass("d-none");
+    $status.removeClass("d-none alert-danger alert-secondary")
+           .addClass("alert-secondary")
+           .html('<span class="spinner-border spinner-border-sm me-2"></span>Loading data…');
+
+    $.getJSON(DATA_URL)
+      .done(function (d) {
+        if (d.error) {
+          $status.removeClass("alert-secondary").addClass("alert-danger")
+                 .text("Could not load: " + d.error);
+          return;
+        }
+        if (!d.rows.length) {
+          $status.text("No records.");
+          return;
+        }
+        // Header
+        $("#thead-row").html(d.columns.map(c => `<th>${esc(c)}</th>`).join(""));
+        // Body
+        $("#tbody").html(d.rows.map(r =>
+          "<tr>" + d.columns.map(c => `<td>${esc(r[c])}</td>`).join("") + "</tr>"
+        ).join(""));
+        $("#rowcount").text(d.count);
+        $("#meta").text(d.fetched_at ? ("as of " + new Date(d.fetched_at).toLocaleString()) : "");
+        $status.addClass("d-none");
+        $wrap.removeClass("d-none");
+        if (dt) { dt.destroy(); }
+        dt = $("#data-table").DataTable({
+          pageLength: 25, lengthMenu: [10, 25, 50, 100], order: [],
+          language: { search: "Search (MAC / IP / hostname / type):" }
+        });
+      })
+      .fail(function (x) {
+        $status.removeClass("alert-secondary").addClass("alert-danger")
+               .text("Request failed (" + x.status + ").");
+      });
+  }
+
+  $(function () { load(); $("#reload").on("click", load); });
 </script>
 {% endblock %}

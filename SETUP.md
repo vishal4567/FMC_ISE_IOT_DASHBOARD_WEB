@@ -109,6 +109,12 @@ endpoint sync hourly via Celery beat; run it now on demand:
 sudo -u iotdash .venv/bin/python manage.py sync_ise
 # expect: refresh_ise_reference {...}  then  {'iot_endpoints': N, 'with_site': M}
 ```
+Then snapshot the ISE/FMC datasets into the DB (the web reads these, never the
+live APIs; also runs every 15 min via beat):
+```bash
+sudo -u iotdash .venv/bin/python manage.py snapshot_datasets
+# expect: Done: N datasets (E with errors) + connection status written to the DB.
+```
 
 ## 8. FMC events via eStreamer (eNcore)  → full detail in ESTREAMER_SETUP.md
 ```bash

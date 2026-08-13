@@ -15,7 +15,10 @@ ISE inventory is IoT-scoped and split into two cadences:
                           against.
 
 Also:
-* refresh_fmc_config - warm the FMC config caches the dashboard reads.
+* snapshot_datasets  - fetch every external ISE/FMC dataset + a connectivity
+                       probe and persist to the DB Snapshot table. The web tier
+                       reads ONLY these snapshots (never calls ISE/FMC live), so
+                       page loads are a DB read regardless of API latency.
 * rollup_hourly      - recompute HourlyAggregate from raw events.
 * purge_retention    - drop raw events past their retention window.
 
@@ -263,16 +266,14 @@ def _site_for_ip(ip: str, subnets) -> str:
 # --------------------------------------------------------------------------- #
 # FMC + maintenance
 # --------------------------------------------------------------------------- #
-@shared_task(name="dashboard.tasks.refresh_fmc_config")
-def refresh_fmc_config() -> dict:
+@shared_task(name="dashboard.tasks.snapshot_datasets")
+def snapshot_datasets() -> dict:
+    """Fetch every external ISE/FMC dataset live and persist it to the DB
+    Snapshot table (+ a connectivity probe). The web tier reads only these
+    snapshots, so requests never wait on ISE/FMC."""
     from dashboard import services
 
-    keys = ["fmc-devices", "fmc-security-zones", "fmc-access-rules",
-            "fmc-intrusion-policies", "fmc-file-policies", "fmc-network-objects"]
-    for k in keys:
-        services.fetch_dataset(k, use_cache=False)
-    services.connection_status(use_cache=False)
-    return {"refreshed": keys}
+    return services.snapshot_all_datasets()
 
 
 @shared_task(name="dashboard.tasks.rollup_hourly")

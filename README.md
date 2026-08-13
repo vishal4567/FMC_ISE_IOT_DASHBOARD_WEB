@@ -30,7 +30,7 @@ dashboard/
   analytics.py         DB-only analytics + REAL ISE↔FMC correlation (matched vs FMC-only)
   event_store.py       read events as dicts · ISE enrichment · rollups · retention purge
   models.py            SecurityEvent · HourlyAggregate · IoTDevice
-  tasks.py             poll ISE inventory · refresh FMC config · rollup · purge
+  tasks.py             sync IoT endpoints · snapshot ISE/FMC datasets · rollup · purge
   estreamer/           mapping.py (eNcore JSON -> event) · collector.py (connectivity)
   management/commands/
     estreamer_ingest.py   eNcore JSON -> SecurityEvent  (stdin | file)

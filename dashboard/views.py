@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import csv
 
-from django.http import Http404, HttpResponse
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 
 from . import services
@@ -185,21 +185,40 @@ def policy_readiness(request):
 
 
 def dataset_table(request, key):
-    """Generic click-through report table for one dataset."""
+    """Report table shell. Renders instantly; the rows are fetched separately
+    via dataset_json (AJAX) so the page paints without waiting on the data."""
     ds = services.DATASETS.get(key)
     if ds is None:
         raise Http404("Unknown dataset")
+    return render(request, "dashboard/table.html", {"dataset": ds})
 
-    refresh = request.GET.get("refresh") == "1"
-    payload = services.fetch_dataset(key, use_cache=not refresh)
-    context = {
-        "dataset": ds,
+
+def dataset_json(request, key):
+    """Rows for one dataset, as JSON, read from the DB snapshot. This is the
+    'separate API' the table page calls on load - keeps the initial page fast."""
+    ds = services.DATASETS.get(key)
+    if ds is None:
+        raise Http404("Unknown dataset")
+    payload = services.fetch_dataset(key)
+    return JsonResponse({
+        "key": key,
+        "label": ds.label,
         "rows": payload["rows"],
-        "columns": payload["columns"],
+        "columns": payload["columns"] or _infer_cols(payload["rows"]),
         "error": payload["error"],
-        "cached": payload["cached"],
-    }
-    return render(request, "dashboard/table.html", context)
+        "fetched_at": payload.get("fetched_at"),
+        "count": len(payload["rows"]),
+    })
+
+
+def _infer_cols(rows):
+    cols = []
+    for r in rows:
+        if isinstance(r, dict):
+            for k in r:
+                if k not in cols:
+                    cols.append(k)
+    return cols
 
 
 def dataset_csv(request, key):
