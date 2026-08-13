@@ -218,8 +218,9 @@ class Command(BaseCommand):
                 return {"note": f"no ERS endpoint for {mac}"}
             full = ise._ers_get(f"/endpoint/{res[0]['id']}")
             ep = full.get("ERSEndPoint", full) if isinstance(full, dict) else full
-            return {"customAttributes": (ep or {}).get("customAttributes"),
-                    "resolved": {"site": ise.site_attr, "device_type": ise.device_type_attr},
+            return {"mfcAttributes": (ep or {}).get("mfcAttributes"),
+                    "customAttributes": (ep or {}).get("customAttributes"),
+                    "device_type_resolved": ise.mfc_device_type(ep or {}),
                     "full": full}
 
         def _openapi_by_mac():
@@ -258,6 +259,57 @@ class Command(BaseCommand):
                   lambda: self._openapi(ise, "/endpoint", {"size": 20, "page": 1}))
         self._run("ise.openapi.endpoint_group",
                   lambda: self._openapi(ise, "/endpoint-group", {"size": 5, "page": 1}))
+        # IoT scoping: confirm we can fetch ONLY endpoints in an allow-listed
+        # profile / logical profile (the whole point of the hourly sync).
+        self._run("ise.iot.profile_filter", lambda: self._iot_filter(ise))
+
+    def _iot_filter(self, ise):
+        """Resolve the first IoT profiling policy + logical profile from settings
+        and prove the three filter paths work against this ISE:
+          - ERS  filter=profileId.EQ.<id>
+          - ERS  filter=logicalProfileName.EQ.<name>
+          - Open API filter=profileId.EQ.<id>
+        Returns counts so we know which method to use for the sync."""
+        from django.conf import settings
+        cfg = settings.ISE
+        out = {"tried": {}, "counts": {}}
+
+        # a) resolve one profile name -> id
+        names = cfg.get("IOT_PROFILES") or []
+        prof_map = ise.resolve_profile_ids(names[:5]) if names else {}
+        pid = next(iter(prof_map), "")
+        out["resolved_profile"] = {pid: prof_map.get(pid, "")} if pid else {}
+
+        # b) ERS by profileId
+        if pid:
+            try:
+                res = ise._ers_get("/endpoint", {"filter": f"profileId.EQ.{pid}", "size": 5})
+                out["counts"]["ers_by_profileId"] = (
+                    (res.get("SearchResult", {}) or {}).get("total"))
+                out["tried"]["ers_by_profileId"] = "ok"
+            except Exception as exc:
+                out["tried"]["ers_by_profileId"] = str(exc)[:120]
+
+        # c) ERS by logicalProfileName
+        lp = (cfg.get("IOT_LOGICAL_PROFILES") or [""])[0]
+        if lp:
+            try:
+                res = ise._ers_get("/endpoint", {"filter": f"logicalProfileName.EQ.{lp}", "size": 5})
+                out["counts"]["ers_by_logicalProfile"] = (
+                    (res.get("SearchResult", {}) or {}).get("total"))
+                out["tried"][f"ers_by_logicalProfile:{lp}"] = "ok"
+            except Exception as exc:
+                out["tried"][f"ers_by_logicalProfile:{lp}"] = str(exc)[:120]
+
+        # d) Open API by profileId
+        if pid:
+            try:
+                data = self._openapi(ise, "/endpoint", {"filter": f"profileId.EQ.{pid}", "size": 5})
+                out["tried"]["openapi_by_profileId"] = "ok"
+                out["openapi_sample"] = data
+            except Exception as exc:
+                out["tried"]["openapi_by_profileId"] = str(exc)[:120]
+        return out
 
     def _openapi(self, ise, path, params):
         """ISE Open API GET. Base: https://<host>/api/v1 (always :443).

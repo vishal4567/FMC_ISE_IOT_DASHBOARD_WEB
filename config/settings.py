@@ -95,26 +95,19 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
-# Database: PostgreSQL when configured (production), else SQLite (dev/POC).
-if os.environ.get("POSTGRES_HOST"):
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": os.environ.get("POSTGRES_DB", "iotdash"),
-            "USER": os.environ.get("POSTGRES_USER", "iotdash"),
-            "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
-            "HOST": os.environ.get("POSTGRES_HOST"),
-            "PORT": os.environ.get("POSTGRES_PORT", "5432"),
-            "CONN_MAX_AGE": _env_int("DB_CONN_MAX_AGE", 60),
-        }
+# Database: PostgreSQL only. This is a production build - there is no SQLite
+# fallback. POSTGRES_HOST must be set (see .env.prod / install_rhel9.sh).
+DATABASES = {
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("POSTGRES_DB", "iotdash"),
+        "USER": os.environ.get("POSTGRES_USER", "iotdash"),
+        "PASSWORD": os.environ.get("POSTGRES_PASSWORD", ""),
+        "HOST": os.environ.get("POSTGRES_HOST", "localhost"),
+        "PORT": os.environ.get("POSTGRES_PORT", "5432"),
+        "CONN_MAX_AGE": _env_int("DB_CONN_MAX_AGE", 60),
     }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
+}
 
 LANGUAGE_CODE = "en-us"
 TIME_ZONE = os.environ.get("DJANGO_TIME_ZONE", "UTC")
@@ -172,7 +165,12 @@ CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", REDIS_URL or Non
 CELERY_TASK_ALWAYS_EAGER = _env_bool("CELERY_TASK_ALWAYS_EAGER", False)
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE_MINUTES = {
-    "ise_poll": _env_int("POLL_ISE_MINUTES", 15),
+    # Daily: resolve IoT profile ids + rebuild the NAD->location map (slow-moving
+    # reference data). 1440 = 24h.
+    "ise_reference": _env_int("ISE_REFERENCE_MINUTES", 1440),
+    # Hourly: sync the IoT endpoint inventory (device type + site) for the
+    # allow-listed profiles only.
+    "iot_sync": _env_int("IOT_SYNC_MINUTES", 60),
     "config_poll": _env_int("POLL_CONFIG_MINUTES", 15),
     "rollup": _env_int("ROLLUP_MINUTES", 60),
     "purge": _env_int("PURGE_MINUTES", 720),
@@ -190,6 +188,22 @@ if not DEBUG:
 # ---------------------------------------------------------------------------
 # Cisco ISE configuration
 # ---------------------------------------------------------------------------
+# Default IoT profiling policies to import (the org's CCTV / Access-Control /
+# BMS logical-profile members). Override wholesale with ISE_IOT_PROFILES.
+_DEFAULT_IOT_PROFILES = [
+    # Wipro_CCTV
+    "Axis-Device", "Axis-Network-Camera", "EverFocus-Electronics-Corp",
+    "Mobotix-Camera", "MotorolaSolutions-Device", "Sony-Corporation-Devices",
+    "SONY-TEKTRONIX-CORP-Devices", "VCS-Video-Communication-Devices",
+    "Vivotek-Devices", "Vivotek-Devices-Camera",
+    # Wipro-Access-Control
+    "Access-Control", "Automated-Logic-Device", "Barco-Projection-System",
+    "Bosch_Security_Systems", "ICOM-Device", "ICPDAS-ACS", "Spidernet_ACS",
+    "WAVERIDER-ACS",
+    # Wipro-BMS
+    "Alteron-Devices", "Eliwell-Controls-Devices", "Texas-Instruments-Devices",
+]
+
 ISE = {
     "ENABLED": _env_bool("ISE_ENABLED", True),
     # Host only, e.g. "sandboxdnac.cisco.com" or "10.10.20.70" (no scheme).
@@ -199,15 +213,47 @@ ISE = {
     "PASSWORD": os.environ.get("ISE_PASSWORD", ""),
     "VERIFY_TLS": _env_bool("ISE_VERIFY_TLS", False),
     "TIMEOUT": _env_int("ISE_TIMEOUT", 30),
-    # How many endpoints to pull full attribute detail for (per-endpoint GETs).
-    "DETAIL_LIMIT": _env_int("ISE_DETAIL_LIMIT", 50),
     "PAGE_SIZE": _env_int("ISE_PAGE_SIZE", 100),
-    "MAX_PAGES": _env_int("ISE_MAX_PAGES", 20),
-    # Names of the ISE endpoint custom attributes that carry site/location and
-    # device type (the "Location" / "Device Type" columns in ISE Context
-    # Visibility). Override if your org named them differently.
-    "SITE_ATTR": os.environ.get("ISE_SITE_ATTR", "Location"),
+    "MAX_PAGES": _env_int("ISE_MAX_PAGES", 200),
+    # ---- IoT scoping -------------------------------------------------------
+    # We import ONLY endpoints whose ISE profiling policy is in this allow-list
+    # (the org's IoT device categories - e.g. the Wipro_CCTV / Access-Control /
+    # BMS logical-profile members). Everything else (laptops, phones, servers)
+    # is ignored. Comma-separated profiling-policy names; resolved to profileIds
+    # by the daily reference task.
+    "IOT_PROFILES": [
+        p.strip()
+        for p in os.environ.get("ISE_IOT_PROFILES", ",".join(_DEFAULT_IOT_PROFILES)).split(",")
+        if p.strip()
+    ],
+    # Logical profiles grouping the IoT policies (from ISE Profiling > Logical
+    # Profiles). If set, endpoints are fetched by logicalProfileName - far fewer
+    # ISE calls than per-policy. Blank -> fall back to per-profile filtering.
+    "IOT_LOGICAL_PROFILES": [
+        p.strip()
+        for p in os.environ.get(
+            "ISE_IOT_LOGICAL_PROFILES", "Wipro_CCTV,Wipro-Access-Control,Wipro-BMS"
+        ).split(",")
+        if p.strip()
+    ],
+    # Prefer the Open API filter (profileId.EQ) to fetch only IoT endpoints; set
+    # False to page all endpoints and filter client-side (fallback for ISE
+    # versions whose Open API doesn't support the filter).
+    "USE_OPENAPI_FILTER": _env_bool("ISE_USE_OPENAPI_FILTER", True),
+    "OPENAPI_PAGE_SIZE": _env_int("ISE_OPENAPI_PAGE_SIZE", 500),
+    # How the site/location per endpoint is derived:
+    #   session - MnT session -> NAS IP -> NAD Location group (accurate, live)
+    #   subnet  - map the device IP to a site via ISE_SITE_SUBNETS (cheap/static)
+    #   off     - don't resolve location
+    "LOCATION_METHOD": os.environ.get("ISE_LOCATION_METHOD", "session").strip().lower(),
+    # site=CIDR pairs for LOCATION_METHOD=subnet, e.g.
+    #   "Mumbai=10.59.0.0/16;PUNE=10.22.0.0/16"
+    "SITE_SUBNETS": os.environ.get("ISE_SITE_SUBNETS", ""),
+    # Device-type custom attribute (last-resort fallback; primary source is
+    # mfcAttributes.mfcDeviceType, then the profiling-policy name).
     "DEVICE_TYPE_ATTR": os.environ.get("ISE_DEVICE_TYPE_ATTR", "Device Type"),
+    # Parallelism for per-endpoint detail / session lookups.
+    "SYNC_WORKERS": _env_int("ISE_SYNC_WORKERS", 8),
 }
 
 # ---------------------------------------------------------------------------

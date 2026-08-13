@@ -45,7 +45,7 @@ deploy/                install_rhel9.sh · systemd units · nginx · gunicorn co
 | `manage.py probe_apis --out api_responses.json` | Test/fetch every ISE/FMC API response (+ eStreamer reachability) → a file to review or hand back for tuning |
 | `manage.py estreamer_ingest --source stdin` | Ingest live eNcore JSON events |
 | `manage.py estreamer_ingest --source file --path events.jsonl` | Replay captured events |
-| `dashboard.tasks.poll_ise_inventory` | Refresh IoTDevice inventory from ISE |
+| `manage.py sync_ise` | Sync the IoT endpoint inventory from ISE (allow-listed profiles only) |
 
 ## Customising the parsers
 `dashboard/estreamer/mapping.py` maps eNcore/eStreamer fields → the event model —

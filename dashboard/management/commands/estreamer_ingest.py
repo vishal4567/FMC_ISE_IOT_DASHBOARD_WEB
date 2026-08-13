@@ -15,7 +15,7 @@ eStreamer event ingester.
 
 Each record is mapped (dashboard/estreamer/mapping.py), enriched with ISE
 identity (device_type / site / in_ise, from the IoTDevice inventory that the
-poll_ise_inventory task keeps current), then bulk-written to SecurityEvent.
+sync_iot_endpoints task keeps current), then bulk-written to SecurityEvent.
 """
 import json
 import sys

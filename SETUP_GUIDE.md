@@ -13,7 +13,7 @@ move on until it passes. Companion docs are referenced where they go deeper:
 ## Architecture (what you're building)
 ```
                     ┌──────────── RHEL 9.8 host(s) ────────────┐
- Cisco ISE  ──REST(443)──►  poll_ise_inventory ─► IoTDevice ┐  │
+ Cisco ISE  ──REST(443)──►  sync_iot_endpoints ─► IoTDevice ┐  │
  Cisco FMC  ──REST(443)──►  config datasets                 │  │
  Cisco FMC  ──eStreamer(8302)──► eNcore ──JSON──► ingester ─┴─► PostgreSQL ─► Django/gunicorn ─► nginx ─► users
                                                               Redis (cache+broker) · Celery worker+beat
@@ -173,13 +173,16 @@ looks unexpected, send `api_responses.json` back for parser tuning.**
 
 ---
 
-## Phase 6 — Seed ISE inventory
+## Phase 6 — Seed the IoT inventory
 
-Populate `IoTDevice` so events can be correlated + typed (also runs every 15 min via beat):
+Populate `IoTDevice` from ISE so events can be correlated + typed. Imports ONLY
+the allow-listed IoT profiles (`ISE_IOT_LOGICAL_PROFILES` / `ISE_IOT_PROFILES`).
+Reference data refreshes daily and endpoints sync hourly via beat; run now:
 ```bash
-sudo -u iotdash bash -c 'set -a; source .env.prod; set +a; .venv/bin/python -c "import django,os;os.environ[\"DJANGO_SETTINGS_MODULE\"]=\"config.settings\";django.setup();from dashboard.tasks import poll_ise_inventory;print(poll_ise_inventory())"'
+sudo -u iotdash .venv/bin/python manage.py sync_ise
 ```
-✅ **Verify:** it prints `{'ise_devices': <N>}` with N > 0.
+✅ **Verify:** it prints `refresh_ise_reference {...}` then
+`{'iot_endpoints': <N>, 'with_site': <M>}` with N > 0.
 
 ---
 
@@ -244,7 +247,7 @@ journalctl -u iotdash-estreamer -f              # live ingest
 journalctl -u iotdash-web -n 100                # web errors
 
 # scheduled jobs (Celery beat; intervals via .env.prod)
-POLL_ISE_MINUTES=15  POLL_CONFIG_MINUTES=15  ROLLUP_MINUTES=60  PURGE_MINUTES=720
+ISE_REFERENCE_MINUTES=1440  IOT_SYNC_MINUTES=60  POLL_CONFIG_MINUTES=15  ROLLUP_MINUTES=60  PURGE_MINUTES=720
 
 # run a job on demand
 sudo -u iotdash .venv/bin/celery -A config call dashboard.tasks.rollup_hourly
@@ -344,7 +347,7 @@ cd /opt/iotdash && git pull && \
 
 ### A.5 What's kept out of git (safety)
 `.env` / `.env.prod` · `client.pkcs12` / `*.pem` / `*.key` · `api_responses.json`
-· `*.jsonl` captures · `db.sqlite3` · `.venv/` · `staticfiles/`. Verify anytime:
+· `*.jsonl` captures · `.venv/` · `staticfiles/`. Verify anytime:
 ```bash
 git check-ignore -v .env.prod client.pkcs12 api_responses.json
 git ls-files | grep -Ei 'env\.prod|pkcs12|\.key$' || echo "clean - no secrets tracked"

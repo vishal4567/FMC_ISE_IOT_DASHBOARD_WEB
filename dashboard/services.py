@@ -62,10 +62,9 @@ def get_ise_client() -> ISEClient:
             ers_port=cfg["ERS_PORT"],
             verify_tls=cfg["VERIFY_TLS"],
             timeout=cfg["TIMEOUT"],
-            detail_limit=cfg["DETAIL_LIMIT"],
             page_size=cfg["PAGE_SIZE"],
             max_pages=cfg["MAX_PAGES"],
-            site_attr=cfg["SITE_ATTR"],
+            openapi_page_size=cfg["OPENAPI_PAGE_SIZE"],
             device_type_attr=cfg["DEVICE_TYPE_ATTR"],
         )
         _CLIENT_CACHE[key] = client
@@ -107,7 +106,24 @@ class Dataset:
 
 
 def _ise_endpoints():
-    return get_ise_client().get_endpoints(detail=True)
+    """The IoT endpoint inventory as synced from ISE into IoTDevice (device type
+    + site). This reads the DB (populated hourly by sync_iot_endpoints), so the
+    Reports view never triggers a live 50k-endpoint walk."""
+    from dashboard.models import IoTDevice
+
+    rows = []
+    for d in IoTDevice.objects.order_by("device_type", "mac"):
+        rows.append({
+            "mac": d.mac,
+            "device_type": d.device_type,
+            "endpoint_profile": d.ise_profile,
+            "site": d.site,
+            "ip": d.ip or "",
+            "hostname": d.hostname,
+            "identity_group": d.ise_identity_group,
+            "last_seen": d.last_seen.isoformat() if d.last_seen else "",
+        })
+    return rows
 
 
 def _ise_endpoint_groups():

@@ -64,12 +64,10 @@ ISE_USERNAME=<ers-user>
 ISE_PASSWORD=<ers-pass>
 ISE_ERS_PORT=443              # try 443 first; 9060 if that times out
 ISE_VERIFY_TLS=True
-# ISE endpoint custom-attribute names that hold site + device type (the
-# "Location" / "Device Type" columns in ISE Context Visibility). Defaults shown;
-# override only if your org named them differently — confirm with:
-#   manage.py probe_apis --mac <a-known-MAC>
-ISE_SITE_ATTR=Location
-ISE_DEVICE_TYPE_ATTR=Device Type
+# Import ONLY these IoT profiles (not all endpoints). Logical profiles preferred:
+ISE_IOT_LOGICAL_PROFILES=Wipro_CCTV,Wipro-Access-Control,Wipro-BMS
+ISE_LOCATION_METHOD=session   # session | subnet | off
+#ISE_SITE_SUBNETS=Mumbai=10.59.0.0/16;PUNE=10.22.0.0/16   # if LOCATION_METHOD=subnet
 
 FMC_HOST=<fmc-host>
 FMC_USERNAME=<fmc-user>
@@ -103,11 +101,13 @@ sudo -u iotdash .venv/bin/python manage.py probe_apis --out api_responses.json
 All rows should say `OK`. ISE timing out → flip `ISE_ERS_PORT` (443 ↔ 9060) in
 `.env.prod` and re-run. Odd fields? send `api_responses.json` for parser tuning.
 
-## 7. Seed ISE device inventory
-(also runs every 15 min via Celery beat)
+## 7. Seed the IoT device inventory
+Imports ONLY the allow-listed IoT profiles (see `ISE_IOT_PROFILES` /
+`ISE_IOT_LOGICAL_PROFILES` in `.env.prod`). Reference refresh runs daily and the
+endpoint sync hourly via Celery beat; run it now on demand:
 ```bash
-sudo -u iotdash .venv/bin/python -c "import django,os;os.environ['DJANGO_SETTINGS_MODULE']='config.settings';django.setup();from dashboard.tasks import poll_ise_inventory;print(poll_ise_inventory())"
-# expect: {'ise_devices': N}  with N > 0
+sudo -u iotdash .venv/bin/python manage.py sync_ise
+# expect: refresh_ise_reference {...}  then  {'iot_endpoints': N, 'with_site': M}
 ```
 
 ## 8. FMC events via eStreamer (eNcore)  → full detail in ESTREAMER_SETUP.md

@@ -19,9 +19,12 @@ def setup_periodic_tasks(sender, **kwargs):
     from django.conf import settings
 
     mins = settings.CELERY_BEAT_SCHEDULE_MINUTES
-    sender.add_periodic_task(schedule(60 * mins["ise_poll"]),
-                             app.signature("dashboard.tasks.poll_ise_inventory"),
-                             name="poll ISE inventory")
+    sender.add_periodic_task(schedule(60 * mins["ise_reference"]),
+                             app.signature("dashboard.tasks.refresh_ise_reference"),
+                             name="refresh ISE reference (daily)")
+    sender.add_periodic_task(schedule(60 * mins["iot_sync"]),
+                             app.signature("dashboard.tasks.sync_iot_endpoints"),
+                             name="sync IoT endpoints (hourly)")
     sender.add_periodic_task(schedule(60 * mins["config_poll"]),
                              app.signature("dashboard.tasks.refresh_fmc_config"),
                              name="refresh FMC config")

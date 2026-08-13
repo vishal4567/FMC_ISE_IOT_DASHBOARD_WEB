@@ -12,9 +12,10 @@ Talks to two ISE interfaces:
 
 Design notes
 ------------
-* Endpoint *lists* from ERS are cheap (id + MAC only). Full attributes
-  (profile, identity group, static assignment, ...) require one GET per
-  endpoint, so we enrich only up to ``detail_limit`` endpoints, in parallel.
+* This is a large ISE (tens of thousands of endpoints). We never walk every
+  endpoint: the inventory is IoT-scoped via ISE server-side filters
+  (``logicalProfileName`` / ``profileId``) and only that small set is enriched
+  (device type from ``mfcAttributes``; site from session -> NAS -> NAD Location).
 * Every public method returns plain ``list[dict]`` / ``dict`` so the client
   is usable outside Django (scripts, tests) with no framework coupling.
 * TLS verification is configurable and defaults off for lab/sandbox use.
@@ -42,10 +43,9 @@ class ISEClient:
         ers_port=9060,
         verify_tls=False,
         timeout=30,
-        detail_limit=50,
         page_size=100,
-        max_pages=20,
-        site_attr="Location",
+        max_pages=200,
+        openapi_page_size=500,
         device_type_attr="Device Type",
     ):
         if not host or not username or not password:
@@ -59,13 +59,11 @@ class ISEClient:
         self.ers_port = ers_port
         self.verify_tls = verify_tls
         self.timeout = timeout
-        self.detail_limit = detail_limit
         self.page_size = page_size
         self.max_pages = max_pages
-        # Names of the ISE endpoint *custom attributes* that carry site/location
-        # and device type (as seen in the ISE Context Visibility columns). These
-        # are org-defined, so they're configurable.
-        self.site_attr = site_attr
+        self.openapi_page_size = openapi_page_size
+        # Endpoint custom attribute that (in some orgs) carries device type; used
+        # only as a last-resort fallback - the primary source is mfcAttributes.
         self.device_type_attr = device_type_attr
 
         self._session = requests.Session()
@@ -147,59 +145,76 @@ class ISEClient:
         return resources
 
     # ------------------------------------------------------------------ #
-    # Endpoints
+    # IoT-scoped endpoint inventory
+    #
+    # This is a large ISE (tens of thousands of endpoints), so we NEVER walk
+    # every endpoint. We import only endpoints whose profiling policy / logical
+    # profile is in the IoT allow-list, using ISE's server-side filters, then
+    # enrich that small set with device type (mfcAttributes) and site (session
+    # -> NAS -> NAD Location group).
     # ------------------------------------------------------------------ #
-    def get_endpoints(self, detail=True):
-        """Return endpoints, each labelled with its **identity group** and
-        (where available) its **profiler-profile name**.
+    def resolve_profile_ids(self, names):
+        """Map IoT profiling-policy *names* -> ids via ``/profilerprofile``.
+        Returns ``{id: name}`` for the names that exist (unmatched are skipped).
+        Fetches the profiler catalogue once - run daily, not hourly."""
+        wanted = {n.strip().lower() for n in names if n and n.strip()}
+        out = {}
+        if not wanted:
+            return out
+        for p in self.get_profiler_profiles():
+            nm = p.get("name") or ""
+            if nm.lower() in wanted and p.get("id"):
+                out[p["id"]] = nm
+        return out
 
-        Coverage strategy: every ISE endpoint belongs to exactly one identity
-        group, and ISE's profile-based groups mirror the profiler result
-        (Cisco-IP-Phone, Axis-Device, ...). So we build the base list by
-        listing endpoints per identity group - this labels *all* endpoints
-        with their profile category cheaply. We then enrich up to
-        ``detail_limit`` endpoints (profiled ones first) with per-endpoint
-        detail to resolve the granular profiler-profile name from ``profileId``.
-        """
-        base = self._endpoints_by_group()
-        if not base:
-            return []
+    def iot_endpoint_refs(self, *, logical_profiles=(), profile_ids=()):
+        """Light ``{MAC: {id, mac, ...}}`` for IoT endpoints, via ERS server-side
+        filters. ``logicalProfileName`` is preferred (one filtered call per
+        logical profile); ``profileId`` is the per-policy fallback."""
+        refs = {}
+        for lp in logical_profiles:
+            if not lp:
+                continue
+            for e in self._ers_collection("/endpoint", {"filter": f"logicalProfileName.EQ.{lp}"}):
+                mac = (e.get("name") or "").upper()
+                if mac:
+                    refs.setdefault(mac, {"id": e.get("id", ""), "mac": mac})["logical_profile"] = lp
+        for pid in profile_ids:
+            if not pid:
+                continue
+            for e in self._ers_collection("/endpoint", {"filter": f"profileId.EQ.{pid}"}):
+                mac = (e.get("name") or "").upper()
+                if mac:
+                    refs.setdefault(mac, {"id": e.get("id", ""), "mac": mac})["profile_id"] = pid
+        return refs
 
-        detailed = {}
-        if detail:
-            # Enrich profiled (non-"Unknown") endpoints first so their profile
-            # name is always resolved, then spend any remaining budget.
-            ordered = sorted(base, key=lambda b: b["group"].lower() == "unknown")
-            to_enrich = ordered[: self.detail_limit]
-            with ThreadPoolExecutor(max_workers=8) as pool:
-                futures = {
-                    pool.submit(self._get_endpoint_detail, b["id"]): b["id"]
-                    for b in to_enrich
-                    if b["id"]
-                }
-                for fut in as_completed(futures):
-                    ep_id = futures[fut]
-                    try:
-                        detailed[ep_id] = fut.result()
-                    except IntegrationError:
-                        detailed[ep_id] = None
+    def endpoint_detail(self, endpoint_id):
+        """Full ERS endpoint object (incl. ``mfcAttributes`` + ``profileId``)."""
+        data = self._ers_get(f"/endpoint/{endpoint_id}")
+        return data.get("ERSEndPoint", data) if isinstance(data, dict) else {}
 
-        # Resolve profiler-profile names ONLY for the profileIds actually present
-        # in the enriched endpoints. Fetching the full profiler-profile catalogue
-        # (~700 entries) just to name a handful of profiled endpoints costs ~40s
-        # against the sandbox; per-id lookups are a couple of calls at most.
-        profile_ids = {
-            d.get("profileId") for d in detailed.values() if d and d.get("profileId")
-        }
-        profile_map = {pid: self._profiler_profile_name(pid) for pid in profile_ids}
+    @staticmethod
+    def mfc_device_type(full):
+        """Device type from Cisco endpoint fingerprinting - the ISE Context
+        Visibility "Device Type" column (e.g. 'Zebra-Device')."""
+        mfc = (full or {}).get("mfcAttributes") or {}
+        dt = mfc.get("mfcDeviceType") or []
+        if isinstance(dt, list):
+            return str(dt[0]) if dt else ""
+        return str(dt or "")
 
-        return [self._endpoint_row(b, detailed.get(b["id"]), profile_map) for b in base]
+    @staticmethod
+    def mfc_manufacturer(full):
+        mfc = (full or {}).get("mfcAttributes") or {}
+        m = mfc.get("mfcHardwareManufacturer") or []
+        if isinstance(m, list):
+            return str(m[0]) if m else ""
+        return str(m or "")
 
     @staticmethod
     def _flatten_custom_attrs(full):
-        """Return the endpoint's custom attributes as a flat ``{name: value}``
-        dict. ERS nests them as ``customAttributes.customAttributes``; the Open
-        API returns a flat ``customAttributes`` - handle both."""
+        """Endpoint custom attributes as a flat ``{name: value}`` dict (ERS nests
+        them as ``customAttributes.customAttributes``)."""
         if not isinstance(full, dict):
             return {}
         ca = full.get("customAttributes") or {}
@@ -207,20 +222,34 @@ class ISEClient:
             ca = ca["customAttributes"]
         return ca if isinstance(ca, dict) else {}
 
-    def _profiler_profile_name(self, profile_id):
-        """Resolve a single profiler-profile id -> name, memoised per client."""
-        cache = self.__dict__.setdefault("_profile_name_cache", {})
-        if profile_id in cache:
-            return cache[profile_id]
-        name = profile_id
+    def enrich_endpoint(self, ref, profile_name_by_id=None):
+        """Turn a light ref into a full inventory row: device type (mfc ->
+        profile name -> custom attr), profile, manufacturer."""
+        profile_name_by_id = profile_name_by_id or {}
+        full = {}
         try:
-            data = self._ers_get(f"/profilerprofile/{profile_id}")
-            if isinstance(data, dict):
-                name = (data.get("ProfilerProfile", data) or {}).get("name", profile_id)
+            full = self.endpoint_detail(ref["id"]) if ref.get("id") else {}
         except IntegrationError:
-            pass
-        cache[profile_id] = name
-        return name
+            full = {}
+        pid = full.get("profileId", "") or ""
+        profile = profile_name_by_id.get(pid, "") or ref.get("logical_profile", "")
+        device_type = (
+            self.mfc_device_type(full)
+            or profile
+            or self._flatten_custom_attrs(full).get(self.device_type_attr, "")
+        )
+        return {
+            "mac": ref["mac"],
+            "endpoint_id": ref.get("id", ""),
+            "profile_id": pid or ref.get("profile_id", ""),
+            "endpoint_profile": profile,
+            "logical_profile": ref.get("logical_profile", ""),
+            "device_type": str(device_type or ""),
+            "manufacturer": self.mfc_manufacturer(full),
+            "description": full.get("description", ""),
+            "site": "",   # filled by the location resolver
+            "ip": "",
+        }
 
     def get_endpoint_count(self):
         """Cheap total endpoint count (single ERS call) for the W1 tile."""
@@ -228,65 +257,73 @@ class ISEClient:
         result = data.get("SearchResult", {}) if isinstance(data, dict) else {}
         return int(result.get("total", 0) or 0)
 
-    def get_endpoint_macs(self, limit=120):
-        """A fast MAC sample (plain endpoint list, capped) - used to seed the
-        correlation device pool without the full per-group/detail enrichment."""
-        macs = []
-        page = 1
-        while page <= self.max_pages and len(macs) < limit:
-            data = self._ers_get("/endpoint", params={"size": self.page_size, "page": page})
-            result = data.get("SearchResult", {}) if isinstance(data, dict) else {}
-            batch = result.get("resources", []) or []
-            macs.extend(e.get("name", "") for e in batch if e.get("name"))
-            if len(batch) < self.page_size:
-                break
-            page += 1
-        return macs[:limit]
+    # ------------------------------------------------------------------ #
+    # Location: NAD Location groups + live session lookup
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _location_from_groups(groups):
+        """Deepest site from a NAD's ``NetworkDeviceGroupList``. Root
+        'Location#All Locations' (no sub-tree) yields '' (not a real site)."""
+        for g in groups or []:
+            if isinstance(g, str) and g.startswith("Location#"):
+                parts = g.split("#")
+                if len(parts) >= 3:      # Location # All Locations # <site> [ # ...]
+                    return parts[-1].strip()
+        return ""
 
-    def _endpoints_by_group(self):
-        """Every endpoint as ``{id, mac, group}`` by walking identity groups."""
-        rows = []
-        for g in self.get_endpoint_groups():
-            for e in self.get_endpoints_in_group(g["id"]):
-                rows.append(
-                    {"id": e.get("id", ""), "mac": e.get("name", ""), "group": g["name"]}
-                )
-        return rows
+    def nad_location_map(self):
+        """``{NAS_IP: site}`` built from every NAD's Location group. Slow (one
+        detail GET per NAD) - run daily and cache."""
+        out = {}
+        light = self._ers_collection("/networkdevice")
+        ids = [d.get("id") for d in light if d.get("id")]
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = {pool.submit(self._networkdevice_detail, i): i for i in ids}
+            for fut in as_completed(futures):
+                try:
+                    nad = fut.result()
+                except IntegrationError:
+                    continue
+                site = self._location_from_groups(nad.get("NetworkDeviceGroupList"))
+                if not site:
+                    continue
+                for ipentry in nad.get("NetworkDeviceIPList", []) or []:
+                    ip = (ipentry or {}).get("ipaddress")
+                    if ip:
+                        out[ip] = site
+        return out
 
-    def _get_endpoint_detail(self, endpoint_id):
-        data = self._ers_get(f"/endpoint/{endpoint_id}")
-        return data.get("ERSEndPoint", data) if isinstance(data, dict) else {}
+    def _networkdevice_detail(self, nad_id):
+        data = self._ers_get(f"/networkdevice/{nad_id}")
+        return data.get("NetworkDevice", data) if isinstance(data, dict) else {}
 
-    def _endpoint_row(self, base, full, profile_map):
-        row = {
-            "mac": base["mac"],
-            "identity_group": base["group"],
-            "endpoint_profile": "",
-            "static_group_assignment": "",
-            "endpoint_id": base["id"],
-            "description": "",
-            "custom_attributes": {},
-            "site": "",
-            "device_type_attr": "",
-        }
-        if full:
-            pid = full.get("profileId", "")
-            if pid:
-                row["endpoint_profile"] = profile_map.get(pid, pid)
-            else:
-                row["endpoint_profile"] = "Unknown / unprofiled"
-            row["static_group_assignment"] = full.get("staticGroupAssignment", "")
-            row["description"] = full.get("description", "")
-            # Org-defined custom attributes carry site (Location) + device type,
-            # as shown in the ISE Context Visibility columns.
-            ca = self._flatten_custom_attrs(full)
-            row["custom_attributes"] = ca
-            row["site"] = str(ca.get(self.site_attr, "") or "")
-            row["device_type_attr"] = str(ca.get(self.device_type_attr, "") or "")
-        else:
-            # Not enriched - identity group still conveys the profile category.
-            row["endpoint_profile"] = "(detail not fetched)"
-        return row
+    def session_by_mac(self, mac):
+        """Live MnT session for a MAC -> flat field dict (nas_ip_address,
+        framed_ip_address, ...). Empty dict if no active session."""
+        url = f"https://{self.host}/admin/API/mnt/Session/MACAddress/{mac}"
+        try:
+            resp = self._session.get(url, timeout=self.timeout)
+        except requests.RequestException:
+            return {}
+        if resp.status_code >= 400:
+            return {}
+        return self._parse_session_fields(resp.text)
+
+    @staticmethod
+    def _parse_session_fields(xml_text):
+        try:
+            root = ET.fromstring(xml_text)
+        except ET.ParseError:
+            return {}
+        fields = {}
+        # Take the last (most recent) session's leaf fields.
+        containers = list(root.iter("activeSession")) or [root]
+        for child in containers[-1].iter():
+            if list(child):        # skip container nodes
+                continue
+            if child.tag and child.text and child.text.strip():
+                fields[child.tag] = child.text.strip()
+        return fields
 
     # ------------------------------------------------------------------ #
     # Endpoint identity groups
