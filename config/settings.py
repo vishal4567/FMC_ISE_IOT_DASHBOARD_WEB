@@ -243,8 +243,9 @@ ISE = {
         if p.strip()
     ],
     # How the site/location per endpoint is derived:
-    #   session - MnT session -> NAS IP -> NAD Location group (accurate, live)
-    #   subnet  - map the device IP to a site via ISE_SITE_SUBNETS (cheap/static)
+    #   session - MnT session -> NAS IP/name -> NAD Location group. IP-independent
+    #             (uses the switch/WLC, not the endpoint IP). This is the default.
+    #   subnet  - map the endpoint IP to a site (only if IP is available)
     #   off     - don't resolve location
     "LOCATION_METHOD": os.environ.get("ISE_LOCATION_METHOD", "session").strip().lower(),
     # site=CIDR pairs for LOCATION_METHOD=subnet, e.g.

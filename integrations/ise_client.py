@@ -272,8 +272,9 @@ class ISEClient:
         return ""
 
     def nad_location_map(self):
-        """``{NAS_IP: site}`` built from every NAD's Location group. Slow (one
-        detail GET per NAD) - run daily and cache."""
+        """``{key: site}`` from every NAD's Location group, keyed by BOTH each
+        NAD IP and the NAD name (sessions may report either). Slow (one detail
+        GET per NAD) - run daily and cache."""
         out = {}
         light = self._ers_collection("/networkdevice")
         ids = [d.get("id") for d in light if d.get("id")]
@@ -287,6 +288,8 @@ class ISEClient:
                 site = self._location_from_groups(nad.get("NetworkDeviceGroupList"))
                 if not site:
                     continue
+                if nad.get("name"):
+                    out[nad["name"]] = site
                 for ipentry in nad.get("NetworkDeviceIPList", []) or []:
                     ip = (ipentry or {}).get("ipaddress")
                     if ip:

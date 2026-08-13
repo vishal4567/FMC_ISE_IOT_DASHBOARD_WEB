@@ -211,7 +211,13 @@ def _resolve_site(ise, row, method, nad_map, subnets):
     if method == "session":
         sess = ise.session_by_mac(row["mac"])
         row["ip"] = row.get("ip") or sess.get("framed_ip_address", "")
-        row["site"] = nad_map.get(sess.get("nas_ip_address", ""), "")
+        # Match the NAD by IP, then by name (sessions report one or the other).
+        for k in ("nas_ip_address", "nas_ip", "network_device_name",
+                  "nas_identifier", "acs_server"):
+            site = nad_map.get(sess.get(k, ""))
+            if site:
+                row["site"] = site
+                break
 
 
 def _parse_site_subnets(spec: str):
