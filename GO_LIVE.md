@@ -237,6 +237,8 @@ git stash drop 2>/dev/null || true           # discard the §4 stash if unneeded
 
 | Symptom | Fix |
 |---|---|
+| build fails: `resolve image config for docker.io/docker/dockerfile:1` | host can't pull the BuildKit frontend; the `# syntax=` line is already removed — `git pull` this build. Fallback: `DOCKER_BUILDKIT=0 docker compose build` |
+| build fails pulling `python:3.12-slim` / alpine images | host can't reach docker.io — configure a registry mirror in `/etc/docker/daemon.json` (`"registry-mirrors"`) or `docker login <internal-registry>`, then rebuild |
 | `pg_dump` / `sudo -u postgres` fails ("no postgres service") | Postgres is the Docker `postgres` container — use `docker compose exec -T postgres pg_dump …`; if no such container, the old build was SQLite (re-seed fresh) |
 | old task still firing | restart `iotdash-beat` / `worker` — beat rebuilds its schedule on start |
 | stale numbers after cutover | `bash deploy/cleanup.sh --cache --yes` (flush Redis), reload page |
