@@ -34,8 +34,10 @@ sudo -u iotdash "${APP_DIR}/.venv/bin/pip" install -r "${APP_DIR}/requirements-p
 
 echo "==> Migrate + collectstatic"
 cd "${APP_DIR}"
-sudo -u iotdash bash -c "set -a; source ${APP_DIR}/.env.prod; set +a; ${APP_DIR}/.venv/bin/python manage.py migrate --noinput"
-sudo -u iotdash bash -c "set -a; source ${APP_DIR}/.env.prod; set +a; ${APP_DIR}/.venv/bin/python manage.py collectstatic --noinput"
+# settings.py auto-loads .env.prod via python-dotenv, so NO fragile `source`
+# (which breaks on passwords containing special shell characters).
+sudo -u iotdash "${APP_DIR}/.venv/bin/python" "${APP_DIR}/manage.py" migrate --noinput
+sudo -u iotdash "${APP_DIR}/.venv/bin/python" "${APP_DIR}/manage.py" collectstatic --noinput
 
 echo "==> SELinux: allow nginx to proxy to gunicorn"
 sudo setsebool -P httpd_can_network_connect 1
