@@ -193,6 +193,12 @@ class ISEClient:
         data = self._ers_get(f"/endpoint/{endpoint_id}")
         return data.get("ERSEndPoint", data) if isinstance(data, dict) else {}
 
+    def endpoint_detail_by_mac(self, mac):
+        """Full ERS endpoint object looked up by MAC (id-format agnostic)."""
+        lst = self._ers_get("/endpoint", {"filter": f"mac.EQ.{mac.strip().upper()}"})
+        res = (lst.get("SearchResult", {}) or {}).get("resources", []) if isinstance(lst, dict) else []
+        return self.endpoint_detail(res[0]["id"]) if res else {}
+
     @staticmethod
     def mfc_device_type(full):
         """Device type from Cisco endpoint fingerprinting - the ISE Context

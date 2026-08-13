@@ -65,7 +65,8 @@ ISE_PASSWORD=<ers-pass>
 ISE_ERS_PORT=443              # try 443 first; 9060 if that times out
 ISE_VERIFY_TLS=True
 # Import ONLY the IoT profiles (not all endpoints), via the Open API:
-ISE_USE_OPENAPI=True          # discover by profileId; deviceType/vendor inline
+ISE_USE_OPENAPI=False         # ERS: filter by profileId, type from mfcAttributes
+ISE_ERS_ENRICH=True
 ISE_LOCATION_METHOD=session   # session = MnT->NAS->NAD Location group (no IP needed)
 
 FMC_HOST=<fmc-host>

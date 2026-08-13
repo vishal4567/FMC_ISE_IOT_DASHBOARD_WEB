@@ -139,9 +139,14 @@ def sync_iot_endpoints() -> dict:
     ers_enrich = cfg["ERS_ENRICH"]
 
     def build_openapi(row):
-        if ers_enrich and not row["device_type"] and row.get("endpoint_id"):
+        # Open API deviceType is blank here, so backfill the device type from
+        # ERS mfcAttributes (by id, falling back to MAC lookup).
+        if ers_enrich and not row["device_type"]:
             try:
-                full = ise.endpoint_detail(row["endpoint_id"])
+                full = (ise.endpoint_detail(row["endpoint_id"]) if row.get("endpoint_id")
+                        else {}) or ise.endpoint_detail_by_mac(row["mac"])
+                if not ise.mfc_device_type(full):
+                    full = ise.endpoint_detail_by_mac(row["mac"]) or full
                 row["device_type"] = ise.mfc_device_type(full) or row["device_type"]
             except Exception:
                 pass

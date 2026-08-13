@@ -226,15 +226,17 @@ ISE = {
         for p in os.environ.get("ISE_IOT_PROFILES", ",".join(_DEFAULT_IOT_PROFILES)).split(",")
         if p.strip()
     ],
-    # PRIMARY discovery path: the ISE Open API (/api/v1/endpoint). It supports a
-    # profileId filter and returns deviceType / vendor / ipAddress inline, so a
-    # single call per IoT profile gives discovery + device type + IP - no ERS or
-    # MnT needed. Set False to use the ERS path instead.
-    "USE_OPENAPI": _env_bool("ISE_USE_OPENAPI", True),
+    # Discovery path. Default is ERS: filter /endpoint by profileId, then read
+    # each endpoint's mfcAttributes.mfcDeviceType for the device type (the ISE
+    # Context Visibility "Device Type"). The Open API's deviceType field is NOT
+    # populated in this deployment, so ERS is the reliable source.
+    # Set True to discover via the Open API instead (still needs ERS_ENRICH for
+    # the device type).
+    "USE_OPENAPI": _env_bool("ISE_USE_OPENAPI", False),
     "OPENAPI_PAGE_SIZE": _env_int("ISE_OPENAPI_PAGE_SIZE", 500),
-    # Optional deep enrichment via ERS /endpoint/{mac}: only used to fill a
-    # device type the Open API left blank (reads mfcAttributes.mfcDeviceType).
-    "ERS_ENRICH": _env_bool("ISE_ERS_ENRICH", False),
+    # Open-API-path only: backfill the (blank) device type from ERS
+    # mfcAttributes. Ignored by the ERS path, which always reads mfcAttributes.
+    "ERS_ENRICH": _env_bool("ISE_ERS_ENRICH", True),
     # ERS-path only: logical profiles to filter by (undocumented ERS filter;
     # blank -> filter by profileId). Ignored when USE_OPENAPI is True.
     "IOT_LOGICAL_PROFILES": [
