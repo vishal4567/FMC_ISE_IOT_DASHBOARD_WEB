@@ -20,6 +20,9 @@ fi
 sudo systemctl enable --now postgresql redis nginx
 
 echo "==> Create database + user"
+# Run psql from a dir the postgres user can enter, else it warns
+# "could not change directory to /opt/iotdash" (harmless, but noisy).
+cd /tmp
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1 || \
   sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
 sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
