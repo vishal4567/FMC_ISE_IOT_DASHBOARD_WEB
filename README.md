@@ -53,6 +53,7 @@ deploy/                install_rhel9.sh · systemd units · nginx · gunicorn co
 (`api_responses.json`) shows the real ISE/FMC field names for the same purpose.
 
 ## Docs
+- **[GO_LIVE.md](GO_LIVE.md) — start here: commit → deploy → run in prod (full runbook)**
 - [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) — which ISE API carries each fact (device type, site, IoT scoping) and why
 - [DOCKER.md](DOCKER.md) — run the whole stack in Docker + how code changes propagate
 - [DEPLOY_RHEL9.md](DEPLOY_RHEL9.md) — RHEL 9.8 install (systemd alternative)
