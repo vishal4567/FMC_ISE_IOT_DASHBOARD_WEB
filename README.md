@@ -53,6 +53,7 @@ deploy/                install_rhel9.sh · systemd units · nginx · gunicorn co
 (`api_responses.json`) shows the real ISE/FMC field names for the same purpose.
 
 ## Docs
+- [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) — which ISE API carries each fact (device type, site, IoT scoping) and why
 - [DEPLOY_RHEL9.md](DEPLOY_RHEL9.md) — RHEL 9.8 install
 - [PREREQUISITES.md](PREREQUISITES.md) — ISE/FMC enablement, accounts, ports, eStreamer cert
 - [docs/DEPLOYMENT_VM_SPEC.md](docs/DEPLOYMENT_VM_SPEC.md) — VM sizing
