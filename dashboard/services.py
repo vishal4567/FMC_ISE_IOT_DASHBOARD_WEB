@@ -12,9 +12,9 @@ Responsibilities
 * Short-lived caching (Django cache) so repeated page loads and the CSV
   export of the same table don't re-hit the sandbox.
 
-Nothing here filters for IoT or correlates ISE<->FMC - that is deliberately
-out of scope for this iteration (per the current requirement). Everything is
-fetched and shown as-is.
+The ISE inventory is IoT-scoped: only endpoints in the allow-listed profiles
+are imported (see dashboard/tasks.sync_iot_endpoints), stamped with device type
+and site, and read back from the DB. FMC config datasets are fetched live.
 """
 from __future__ import annotations
 
@@ -182,32 +182,32 @@ def _fmc_audit():
     return get_fmc_client().get_audit_records()
 
 
-# ---- Simulated FMC event layer (clearly synthetic - see analytics.py) ----
-def _sim_events():
+# ---- Threat analytics (read from the DB event store - see analytics.py) ----
+def _threat_events():
     from dashboard import analytics
 
     return analytics.all_events()
 
 
-def _sim_devices_at_risk():
+def _threat_devices_at_risk():
     from dashboard import analytics
 
     return analytics.devices_at_risk()
 
 
-def _sim_insecure():
+def _threat_insecure():
     from dashboard import analytics
 
     return analytics.insecure_transfers()
 
 
-def _sim_outside_zone():
+def _threat_outside_zone():
     from dashboard import analytics
 
     return analytics.outside_zone()
 
 
-def _sim_correlation():
+def _threat_correlation():
     from dashboard import analytics
 
     return analytics.correlate_to_ise()
@@ -219,13 +219,13 @@ DATASETS: dict[str, Dataset] = {
         # ---- ISE ----
         Dataset(
             key="ise-endpoints",
-            label="ISE Endpoints",
+            label="IoT Endpoints (ISE)",
             source="ISE",
             fetch=_ise_endpoints,
             widget="Widget 1 - Total Devices Onboarded / Asset Inventory",
-            description="All endpoints known to ISE (IoT filter intentionally "
-            "off), each labelled with its identity group; the mapped profiler "
-            "profile name is resolved for enriched endpoints (profiled first).",
+            description="IoT endpoints synced from ISE (allow-listed profiles "
+            "only), each with its device type, ISE profile and site. Read from "
+            "the DB inventory that sync_iot_endpoints refreshes hourly.",
         ),
         Dataset(
             key="ise-endpoint-groups",
@@ -354,7 +354,7 @@ DATASETS: dict[str, Dataset] = {
             key="sim-events",
             label="FMC Events",
             source="FMC",
-            fetch=_sim_events,
+            fetch=_threat_events,
             widget="Events feed (intrusion/connection/malware/file/SI)",
             description="FMC event feed (intrusion / connection / malware / "
             "file / security-intelligence), grounded in real MACs, zones, "
@@ -364,7 +364,7 @@ DATASETS: dict[str, Dataset] = {
             key="sim-devices-at-risk",
             label="IoT Devices at Risk",
             source="FMC",
-            fetch=_sim_devices_at_risk,
+            fetch=_threat_devices_at_risk,
             widget="Widget 2 - IoT Devices at Risk",
             description="Devices ranked by threat events, with ISE correlation.",
         ),
@@ -372,7 +372,7 @@ DATASETS: dict[str, Dataset] = {
             key="sim-insecure",
             label="Insecure Data Transfer",
             source="FMC",
-            fetch=_sim_insecure,
+            fetch=_threat_insecure,
             widget="Use case 4.2 - Insecure data transfer",
             description="Events over clear-text protocols "
             "(Telnet/FTP/HTTP/SNMP/TFTP/SMBv1).",
@@ -381,7 +381,7 @@ DATASETS: dict[str, Dataset] = {
             key="sim-outside-zone",
             label="Assets Outside Allowed Zone",
             source="FMC",
-            fetch=_sim_outside_zone,
+            fetch=_threat_outside_zone,
             widget="Use case 4.3 - Assets talking outside allowed zone",
             description="Blocked cross-zone traffic to Outside / DMZ zones.",
         ),
@@ -389,7 +389,7 @@ DATASETS: dict[str, Dataset] = {
             key="sim-correlation",
             label="ISE â†” FMC Device Mapping",
             source="MAP",
-            fetch=_sim_correlation,
+            fetch=_threat_correlation,
             widget="ISE <-> FMC correlation",
             description="Every FMC event-device mapped to an ISE endpoint by "
             "MAC: matched (with ISE identity) vs unmatched (FMC-only).",
