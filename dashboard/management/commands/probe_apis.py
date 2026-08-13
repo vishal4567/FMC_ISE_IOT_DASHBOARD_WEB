@@ -301,14 +301,23 @@ class Command(BaseCommand):
             except Exception as exc:
                 out["tried"][f"ers_by_logicalProfile:{lp}"] = str(exc)[:120]
 
-        # d) Open API by profileId
+        # d) Open API by profileId - dump the FIRST FULL object untruncated so we
+        #    can see whether deviceType / vendor / ipAddress populate (=> no ERS).
         if pid:
             try:
-                data = self._openapi(ise, "/endpoint", {"filter": f"profileId.EQ.{pid}", "size": 5})
+                raw = ise._openapi_get("/endpoint", {"filter": f"profileId.EQ.{pid}", "size": 5})
+                items = ise._openapi_items(raw)
                 out["tried"]["openapi_by_profileId"] = "ok"
-                out["openapi_sample"] = data
+                out["counts"]["openapi_by_profileId"] = len(items)
+                first = items[0] if items else {}
+                out["openapi_first_full"] = first
+                out["openapi_fields_present"] = {
+                    k: (k in first and first.get(k) not in ("", None, [], {}))
+                    for k in ("profileId", "deviceType", "vendor", "ipAddress",
+                              "productId", "hardwareRevision", "customAttributes")
+                }
             except Exception as exc:
-                out["tried"]["openapi_by_profileId"] = str(exc)[:120]
+                out["tried"]["openapi_by_profileId"] = str(exc)[:150]
         return out
 
     def _openapi(self, ise, path, params):

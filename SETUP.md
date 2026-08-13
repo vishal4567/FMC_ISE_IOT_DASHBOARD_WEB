@@ -64,9 +64,9 @@ ISE_USERNAME=<ers-user>
 ISE_PASSWORD=<ers-pass>
 ISE_ERS_PORT=443              # try 443 first; 9060 if that times out
 ISE_VERIFY_TLS=True
-# Import ONLY these IoT profiles (not all endpoints). Logical profiles preferred:
-ISE_IOT_LOGICAL_PROFILES=Wipro_CCTV,Wipro-Access-Control,Wipro-BMS
-ISE_LOCATION_METHOD=session   # session | subnet | off
+# Import ONLY the IoT profiles (not all endpoints), via the Open API:
+ISE_USE_OPENAPI=True          # discover by profileId; deviceType/vendor/IP inline
+ISE_LOCATION_METHOD=subnet    # subnet (uses inline IP) | session | off
 #ISE_SITE_SUBNETS=Mumbai=10.59.0.0/16;PUNE=10.22.0.0/16   # if LOCATION_METHOD=subnet
 
 FMC_HOST=<fmc-host>

@@ -326,6 +326,128 @@ class ISEClient:
         return fields
 
     # ------------------------------------------------------------------ #
+    # ISE Open API (/api/v1) - primary IoT discovery path
+    #
+    # /api/v1/endpoint supports a profileId filter and returns deviceType /
+    # vendor / ipAddress / customAttributes INLINE, so one call per IoT profile
+    # yields discovery + device type + IP with no ERS/MnT follow-up.
+    # ------------------------------------------------------------------ #
+    @property
+    def openapi_base(self):
+        return f"https://{self.host}/api/v1"
+
+    def _openapi_get(self, path, params=None):
+        url = f"{self.openapi_base}{path}"
+        try:
+            resp = self._session.get(
+                url, params=params, headers={"Accept": "application/json"},
+                timeout=self.timeout,
+            )
+        except requests.RequestException as exc:
+            raise IntegrationError(
+                f"Could not reach ISE Open API at {self.host}: {exc}", source=SOURCE
+            ) from exc
+        if resp.status_code in (401, 403):
+            raise AuthError("ISE Open API authentication failed.",
+                            source=SOURCE, status=resp.status_code)
+        if resp.status_code >= 400:
+            raise IntegrationError(
+                f"ISE Open API error for {path}", source=SOURCE,
+                status=resp.status_code, detail=resp.text[:400])
+        try:
+            return resp.json()
+        except ValueError:
+            return {}
+
+    @staticmethod
+    def _openapi_items(data):
+        """Extract the list of endpoint objects from an Open API response,
+        whatever container ISE wraps them in."""
+        if isinstance(data, list):
+            return data
+        if isinstance(data, dict):
+            for k in ("response", "resources", "items", "SearchResult"):
+                v = data.get(k)
+                if isinstance(v, list):
+                    return v
+                if isinstance(v, dict) and isinstance(v.get("resources"), list):
+                    return v["resources"]
+        return []
+
+    def openapi_endpoint_by_mac(self, mac):
+        """Full Open API endpoint object for one MAC (untruncated)."""
+        return self._openapi_get(f"/endpoint/{mac.strip().upper()}")
+
+    def openapi_iot_endpoints(self, profile_ids):
+        """``{MAC: endpoint_obj}`` for the given profileIds via the Open API
+        filter. Falls back to one full paged scan (client-side filter) if this
+        ISE rejects the profileId filter."""
+        ids = [p for p in profile_ids if p]
+        if not ids:
+            return {}
+        try:
+            return self._openapi_by_filter(ids)
+        except IntegrationError as exc:
+            if getattr(exc, "status", None) == 400:   # filter unsupported
+                return self._openapi_full_scan(set(ids))
+            raise
+
+    def _openapi_page(self, params):
+        page, size = 1, self.openapi_page_size
+        while page <= self.max_pages:
+            q = {"size": size, "page": page}
+            q.update(params)
+            batch = self._openapi_items(self._openapi_get("/endpoint", q))
+            if not batch:
+                break
+            yield from batch
+            if len(batch) < size:
+                break
+            page += 1
+
+    def _openapi_by_filter(self, ids):
+        out = {}
+        for pid in ids:
+            for obj in self._openapi_page({"filter": f"profileId.EQ.{pid}"}):
+                mac = (obj.get("mac") or obj.get("name") or "").upper()
+                if mac:
+                    out[mac] = obj
+        return out
+
+    def _openapi_full_scan(self, id_set):
+        out = {}
+        for obj in self._openapi_page({}):
+            if obj.get("profileId") in id_set:
+                mac = (obj.get("mac") or obj.get("name") or "").upper()
+                if mac:
+                    out[mac] = obj
+        return out
+
+    def map_openapi_endpoint(self, obj, profile_name_by_id=None):
+        """Normalise an Open API endpoint object into an inventory row.
+        device_type: Open API deviceType -> profile name -> vendor."""
+        profile_name_by_id = profile_name_by_id or {}
+        pid = obj.get("profileId", "") or ""
+        profile = profile_name_by_id.get(pid, "")
+        device_type = (
+            str(obj.get("deviceType") or "").strip()
+            or profile
+            or str(obj.get("vendor") or "").strip()
+        )
+        return {
+            "mac": (obj.get("mac") or obj.get("name") or "").upper(),
+            "endpoint_id": obj.get("id", ""),
+            "profile_id": pid,
+            "endpoint_profile": profile,
+            "logical_profile": "",
+            "device_type": device_type,
+            "manufacturer": str(obj.get("vendor") or ""),
+            "description": obj.get("description", ""),
+            "ip": str(obj.get("ipAddress") or ""),
+            "site": "",
+        }
+
+    # ------------------------------------------------------------------ #
     # Endpoint identity groups
     # ------------------------------------------------------------------ #
     def get_endpoint_groups(self):

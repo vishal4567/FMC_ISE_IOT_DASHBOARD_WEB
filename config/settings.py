@@ -226,21 +226,22 @@ ISE = {
         for p in os.environ.get("ISE_IOT_PROFILES", ",".join(_DEFAULT_IOT_PROFILES)).split(",")
         if p.strip()
     ],
-    # Logical profiles grouping the IoT policies (from ISE Profiling > Logical
-    # Profiles). If set, endpoints are fetched by logicalProfileName - far fewer
-    # ISE calls than per-policy. Blank -> fall back to per-profile filtering.
+    # PRIMARY discovery path: the ISE Open API (/api/v1/endpoint). It supports a
+    # profileId filter and returns deviceType / vendor / ipAddress inline, so a
+    # single call per IoT profile gives discovery + device type + IP - no ERS or
+    # MnT needed. Set False to use the ERS path instead.
+    "USE_OPENAPI": _env_bool("ISE_USE_OPENAPI", True),
+    "OPENAPI_PAGE_SIZE": _env_int("ISE_OPENAPI_PAGE_SIZE", 500),
+    # Optional deep enrichment via ERS /endpoint/{mac}: only used to fill a
+    # device type the Open API left blank (reads mfcAttributes.mfcDeviceType).
+    "ERS_ENRICH": _env_bool("ISE_ERS_ENRICH", False),
+    # ERS-path only: logical profiles to filter by (undocumented ERS filter;
+    # blank -> filter by profileId). Ignored when USE_OPENAPI is True.
     "IOT_LOGICAL_PROFILES": [
         p.strip()
-        for p in os.environ.get(
-            "ISE_IOT_LOGICAL_PROFILES", "Wipro_CCTV,Wipro-Access-Control,Wipro-BMS"
-        ).split(",")
+        for p in os.environ.get("ISE_IOT_LOGICAL_PROFILES", "").split(",")
         if p.strip()
     ],
-    # Prefer the Open API filter (profileId.EQ) to fetch only IoT endpoints; set
-    # False to page all endpoints and filter client-side (fallback for ISE
-    # versions whose Open API doesn't support the filter).
-    "USE_OPENAPI_FILTER": _env_bool("ISE_USE_OPENAPI_FILTER", True),
-    "OPENAPI_PAGE_SIZE": _env_int("ISE_OPENAPI_PAGE_SIZE", 500),
     # How the site/location per endpoint is derived:
     #   session - MnT session -> NAS IP -> NAD Location group (accurate, live)
     #   subnet  - map the device IP to a site via ISE_SITE_SUBNETS (cheap/static)

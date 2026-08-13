@@ -107,37 +107,60 @@ def sync_iot_endpoints() -> dict:
         cache.set(_CK_PROFILE_MAP, profile_map, _REFERENCE_TTL)
     nad_map = cache.get(_CK_NAD_LOCATION) or {}
 
-    # 1. Which IoT endpoints exist (light refs via ISE server-side filter).
-    logical = cfg.get("IOT_LOGICAL_PROFILES") or []
-    try:
-        if logical:
-            refs = ise.iot_endpoint_refs(logical_profiles=logical)
-        else:
-            refs = ise.iot_endpoint_refs(profile_ids=list(profile_map.keys()))
-    except Exception as exc:
-        return {"error": f"endpoint fetch failed: {exc}"}
-    if not refs:
-        return {"iot_endpoints": 0, "note": "no endpoints matched the allow-list"}
-
-    # 2. Enrich (device type + profile) and 3. resolve site, in parallel.
     subnets = _parse_site_subnets(cfg["SITE_SUBNETS"])
     method = cfg["LOCATION_METHOD"]
     workers = cfg["SYNC_WORKERS"]
+    profile_ids = list(profile_map.keys())
 
-    def build(ref):
-        row = ise.enrich_endpoint(ref, profile_map)
-        if method != "off":
-            sess = ise.session_by_mac(row["mac"])
-            row["ip"] = sess.get("framed_ip_address", "") or row["ip"]
-            if method == "session":
-                row["site"] = nad_map.get(sess.get("nas_ip_address", ""), "")
-            elif method == "subnet":
-                row["site"] = _site_for_ip(row["ip"], subnets)
+    # 1. Discover IoT endpoints. Open API (primary): deviceType/vendor/ipAddress
+    #    inline. ERS (fallback): light refs then per-endpoint detail.
+    if cfg["USE_OPENAPI"]:
+        try:
+            objs = ise.openapi_iot_endpoints(profile_ids)
+        except Exception as exc:
+            return {"error": f"Open API endpoint fetch failed: {exc}"}
+        base_rows = [ise.map_openapi_endpoint(o, profile_map) for o in objs.values()]
+    else:
+        logical = cfg.get("IOT_LOGICAL_PROFILES") or []
+        try:
+            refs = (ise.iot_endpoint_refs(logical_profiles=logical) if logical
+                    else ise.iot_endpoint_refs(profile_ids=profile_ids))
+        except Exception as exc:
+            return {"error": f"ERS endpoint fetch failed: {exc}"}
+        base_rows = None
+        _refs = list(refs.values())
+    if cfg["USE_OPENAPI"] and not base_rows:
+        return {"iot_endpoints": 0, "note": "no endpoints matched the allow-list"}
+    if not cfg["USE_OPENAPI"] and not _refs:
+        return {"iot_endpoints": 0, "note": "no endpoints matched the allow-list"}
+
+    # 2. Per-endpoint: (ERS-path) enrich detail; optional ERS device-type
+    #    backfill; resolve site. Parallelised.
+    ers_enrich = cfg["ERS_ENRICH"]
+
+    def build_openapi(row):
+        if ers_enrich and not row["device_type"] and row.get("endpoint_id"):
+            try:
+                full = ise.endpoint_detail(row["endpoint_id"])
+                row["device_type"] = ise.mfc_device_type(full) or row["device_type"]
+            except Exception:
+                pass
+        _resolve_site(ise, row, method, nad_map, subnets)
         return row
+
+    def build_ers(ref):
+        row = ise.enrich_endpoint(ref, profile_map)
+        _resolve_site(ise, row, method, nad_map, subnets)
+        return row
+
+    if cfg["USE_OPENAPI"]:
+        work, fn = base_rows, build_openapi
+    else:
+        work, fn = _refs, build_ers
 
     rows = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        for fut in as_completed([pool.submit(build, r) for r in refs.values()]):
+        for fut in as_completed([pool.submit(fn, w) for w in work]):
             try:
                 rows.append(fut.result())
             except Exception:
@@ -174,6 +197,23 @@ def sync_iot_endpoints() -> dict:
 # --------------------------------------------------------------------------- #
 # Location helpers (subnet method)
 # --------------------------------------------------------------------------- #
+def _resolve_site(ise, row, method, nad_map, subnets):
+    """Fill row['site'] (and row['ip'] if empty) per the location method.
+    subnet: uses the endpoint IP (Open API gives it inline; else a session
+    lookup). session: MnT session -> NAS IP -> NAD Location map."""
+    if method == "off":
+        return
+    if method == "subnet":
+        if not row.get("ip"):
+            row["ip"] = ise.session_by_mac(row["mac"]).get("framed_ip_address", "")
+        row["site"] = _site_for_ip(row.get("ip", ""), subnets)
+        return
+    if method == "session":
+        sess = ise.session_by_mac(row["mac"])
+        row["ip"] = row.get("ip") or sess.get("framed_ip_address", "")
+        row["site"] = nad_map.get(sess.get("nas_ip_address", ""), "")
+
+
 def _parse_site_subnets(spec: str):
     """Parse 'Mumbai=10.59.0.0/16;PUNE=10.22.0.0/16' -> [(net, site), ...]."""
     out = []
