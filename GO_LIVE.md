@@ -1,8 +1,10 @@
 # GO-LIVE — clean up the existing prod build and cut over to this one
 
-Runbook for hosts that **already run an earlier build** of this app. It backs up
-what matters, stops the old stack, purges leftover remnants, deploys this build,
-migrates the DB (additive), re-seeds, verifies, and gives you a rollback path.
+Runbook for hosts that **already run an earlier build** of this app. This is a
+**clean-slate cutover — no backups**: it stops the old stack, **wipes all old
+data** (database, Redis, containers, images), deploys this build fresh, seeds
+everything from ISE/FMC, and verifies. All app data is regenerated, so losing the
+old data is intentional and safe.
 
 Deep-dive docs: [DOCKER.md](DOCKER.md) · [SETUP.md](SETUP.md) ·
 [ESTREAMER_SETUP.md](ESTREAMER_SETUP.md) · [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md).
@@ -31,27 +33,21 @@ Command prefixes for the seed/verify steps:
 
 ---
 
-## 1. Pre-cutover — announce a window and BACK UP
+## 1. Clean slate — no backups
 
-Do not skip the backups. Everything else is reversible if you have these.
+You want the old build's data **gone**. Nothing is preserved: the database,
+Redis, containers, images and artifacts are all wiped in §3, and the new build
+re-seeds everything from ISE/FMC. All app data (inventory, snapshots, events) is
+regenerated — losing it is expected and safe.
 
-```bash
-cd /opt/iotdash
-ts=$(date +%Y%m%d-%H%M)
+The only things to keep are the ones that aren't "old build data" and aren't in
+git — your **`.env.prod`** and **`client.pkcs12`**. Leave them in `/opt/iotdash`;
+the cleanup and git steps do not touch them. (Grab a copy elsewhere only if you
+want to be able to reconfigure without re-entering values.)
 
-# a) the database (KEEP — we migrate it, not recreate it)
-# Docker:
-docker compose exec -T postgres pg_dump -U iotdash iotdash > ~/iotdash-db-$ts.sql
-# systemd (system Postgres):
-sudo -u postgres pg_dump iotdash > ~/iotdash-db-$ts.sql
-
-# b) secrets + cert + the current config (never in git)
-cp .env.prod ~/iotdash-env-$ts.bak
-[ -f client.pkcs12 ] && cp client.pkcs12 ~/iotdash-cert-$ts.pkcs12
-
-# c) record the version you're rolling back TO
-git rev-parse HEAD > ~/iotdash-prevref-$ts.txt ; git describe --tags 2>/dev/null >> ~/iotdash-prevref-$ts.txt
-```
+> **Note — there is no system `postgresql` service.** Postgres is the Docker
+> Compose `postgres` container (data in the `iotdash_pgdata` volume). The wipe in
+> §3 removes that volume; a fresh empty DB is created when you bring the stack up.
 
 ---
 
@@ -70,30 +66,35 @@ sudo systemctl stop iotdash-web iotdash-worker iotdash-beat iotdash-estreamer
 
 ---
 
-## 3. Purge leftover remnants
+## 3. Purge EVERYTHING from the old build
 
-Uses the repo's [deploy/cleanup.sh](deploy/cleanup.sh) — **dry-run by default**,
-never touches `.env.prod`/certs/DB unless you pass `--data`.
+Uses the repo's [deploy/cleanup.sh](deploy/cleanup.sh) — **dry-run by default**;
+`.env.prod` and certs are never touched. `--data` adds the destructive DB/volume
+wipe you want here.
 
 ```bash
 cd /opt/iotdash
-bash deploy/cleanup.sh --all            # PREVIEW what will be removed
-bash deploy/cleanup.sh --all --yes      # apply: build artifacts, pyc, staticfiles,
-                                        #        legacy db.sqlite3, eNcore state,
-                                        #        Redis cache, (Docker) stopped stack + images
+bash deploy/cleanup.sh --all --data            # PREVIEW the full wipe (incl. DB)
+bash deploy/cleanup.sh --all --data --yes      # DO IT: compose down -v (removes the
+                                               #   postgres volume + all data), images,
+                                               #   Redis flush, artifacts, legacy sqlite,
+                                               #   eNcore state
 ```
-Why the Redis flush matters: the old build cached live dataset/status results in
-Redis; those keys are stale under the DB-only model. `--all` flushes them.
+This removes the database volume, Redis contents, containers, images, build
+artifacts and eNcore state — a true clean slate. `.env.prod` and `client.pkcs12`
+survive.
 
 Retired systemd units, if any old ones linger from a prior layout:
 ```bash
 systemctl list-unit-files | grep iotdash    # anything not in deploy/systemd/ is stale
-# for each stale one:  sudo systemctl disable --now <unit>; sudo rm /etc/systemd/system/<unit>; 
+# for each stale one:  sudo systemctl disable --now <unit>; sudo rm /etc/systemd/system/<unit>
 sudo systemctl daemon-reload
 ```
 
-> **Do NOT** run `cleanup.sh --data` here — that deletes the database. Only use it
-> if you deliberately want a clean-slate DB (you have the backup from §1).
+Confirm the volume is gone:
+```bash
+docker volume ls | grep iotdash    # expect NO iotdash_pgdata line
+```
 
 ---
 
@@ -155,21 +156,17 @@ sudo -u iotdash .venv/bin/python manage.py collectstatic --noinput
 sudo cp deploy/systemd/*.service /etc/systemd/system/ && sudo systemctl daemon-reload
 sudo systemctl restart iotdash-web iotdash-worker iotdash-beat
 ```
-Migration `0002_snapshot` only **adds** the Snapshot table — your events and
-inventory are preserved.
+The DB volume was wiped in §3, so `migrate` creates **all** tables fresh
+(including the Snapshot table) — expect a full set of "Applying …" lines, not
+just one.
 
 ---
 
-## 7. Refresh the inventory for the new model, then seed snapshots
+## 7. Seed the fresh database
 
-Device type / site are computed differently now, so rebuild the inventory. This
-clears only the **regenerated** tables (IoTDevice + Snapshot); it does **not**
-touch your historical events.
+The DB is empty (wiped in §3, tables created by the §6 migrate). Populate it:
 
 ```bash
-# clear regenerated app data (optional but recommended for a clean inventory)
-manage.py shell -c "from dashboard.models import IoTDevice, Snapshot; IoTDevice.objects.all().delete(); Snapshot.objects.all().delete()"
-
 # 1) validate APIs (read-only); confirm counts.ers_by_profileId > 0
 manage.py probe_apis
 
@@ -212,25 +209,25 @@ bookmark, so it resumes from now — that's fine.)
 
 ## 10. Rollback (if acceptance fails)
 
+You chose a clean slate, so there's no old DB to restore — rollback is just
+redeploying the previous code, which re-seeds itself the same way:
+
 ```bash
 cd /opt/iotdash
-git checkout $(head -1 ~/iotdash-prevref-*.txt)      # the ref you saved in §1
-# redeploy that ref: Docker  -> docker compose build && up -d
-#                    systemd -> pip install -r requirements-prod.txt; migrate; restart
-# only if the DB is wrong, restore the dump:
-#   Docker : docker compose exec -T postgres psql -U iotdash -d iotdash < ~/iotdash-db-<ts>.sql
-#   systemd: sudo -u postgres psql iotdash < ~/iotdash-db-<ts>.sql
+git checkout <previous-tag-or-commit>       # e.g. the tag before v1.0.0
+docker compose down -v                      # clear this attempt
+docker compose build && docker compose up -d
+# then re-run the §7 seed commands for that version
 ```
-This build's migration is additive, so a code-only rollback normally needs no DB
-restore.
+Because all data comes from ISE/FMC, a fresh seed rebuilds it — nothing is lost
+by rolling forward or back.
 
 ---
 
 ## 11. Post-cutover (after it's stable a day or two)
 
 ```bash
-docker image prune -f                       # drop old dangling images (Docker)
-rm ~/iotdash-db-*.sql ~/iotdash-env-*.bak    # remove backups once confident
+docker image prune -f                        # drop old dangling images
 git stash drop 2>/dev/null || true           # discard the §4 stash if unneeded
 ```
 
@@ -240,6 +237,7 @@ git stash drop 2>/dev/null || true           # discard the §4 stash if unneeded
 
 | Symptom | Fix |
 |---|---|
+| `pg_dump` / `sudo -u postgres` fails ("no postgres service") | Postgres is the Docker `postgres` container — use `docker compose exec -T postgres pg_dump …`; if no such container, the old build was SQLite (re-seed fresh) |
 | old task still firing | restart `iotdash-beat` / `worker` — beat rebuilds its schedule on start |
 | stale numbers after cutover | `bash deploy/cleanup.sh --cache --yes` (flush Redis), reload page |
 | reports "Not collected yet" | run `snapshot_datasets` (or wait for the 15-min beat) |
