@@ -65,9 +65,16 @@ def refresh_ise_reference() -> dict:
     # Profile name -> id resolution (only needed when NOT using logical profiles,
     # but we resolve anyway so device-type fallback can name a profileId).
     try:
-        profile_map = ise.resolve_profile_ids(settings.ISE["IOT_PROFILES"])
+        configured = settings.ISE["IOT_PROFILES"]
+        profile_map = ise.resolve_profile_ids(configured)
         cache.set(_CK_PROFILE_MAP, profile_map, _REFERENCE_TTL)
         result["iot_profiles_resolved"] = len(profile_map)
+        # Surface any configured name that didn't match a real ISE profile
+        # (typo / renamed / not in this deployment) instead of silently ignoring.
+        resolved_names = {n.lower() for n in profile_map.values()}
+        unmatched = [n for n in configured if n.lower() not in resolved_names]
+        if unmatched:
+            result["iot_profiles_unmatched"] = unmatched
     except Exception as exc:
         result["profile_error"] = str(exc)
 

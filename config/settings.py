@@ -190,9 +190,12 @@ if not DEBUG:
 # ---------------------------------------------------------------------------
 # Default IoT profiling policies to import (the org's CCTV / Access-Control /
 # BMS logical-profile members). Override wholesale with ISE_IOT_PROFILES.
+# All names below are verified present in the production ISE profiler catalogue
+# (893 profiles). "EverFocus-Electronics-Corp" from the CCTV logical profile is
+# NOT a profiler policy in this ISE, so it is omitted.
 _DEFAULT_IOT_PROFILES = [
     # Wipro_CCTV
-    "Axis-Device", "Axis-Network-Camera", "EverFocus-Electronics-Corp",
+    "Axis-Device", "Axis-Network-Camera",
     "Mobotix-Camera", "MotorolaSolutions-Device", "Sony-Corporation-Devices",
     "SONY-TEKTRONIX-CORP-Devices", "VCS-Video-Communication-Devices",
     "Vivotek-Devices", "Vivotek-Devices-Camera",
