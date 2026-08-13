@@ -8,6 +8,13 @@ DB_NAME="${POSTGRES_DB:-iotdash}"
 DB_USER="${POSTGRES_USER:-iotdash}"
 DB_PASS="${POSTGRES_PASSWORD:-CHANGE_ME}"
 
+# Django 5 requires PostgreSQL >= 14, but RHEL 9's DEFAULT module stream is 13.
+# Enable a newer stream (16 by default; override with PG_STREAM=15) before install.
+PG_STREAM="${PG_STREAM:-16}"
+echo "==> Enabling PostgreSQL ${PG_STREAM} module stream"
+sudo dnf -y module reset postgresql || true
+sudo dnf -y module enable "postgresql:${PG_STREAM}" || true
+
 echo "==> Installing packages (dnf)"
 sudo dnf -y install python3.11 python3.11-pip \
     postgresql-server postgresql-contrib redis nginx \
