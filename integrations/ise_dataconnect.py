@@ -74,10 +74,22 @@ class DataConnectClient:
             ssl_context=ctx, ssl_server_dn_match=False,
         )
 
+    @staticmethod
+    def _tz_string_handler(cursor, metadata):
+        """Fetch TIMESTAMP WITH [LOCAL] TIME ZONE columns as strings. ISE stores
+        some with NAMED zones, which python-oracledb thin mode can't parse
+        (DPY-3022); returning them as VARCHAR sidesteps it."""
+        import oracledb
+        if metadata.type_code in (oracledb.DB_TYPE_TIMESTAMP_TZ,
+                                  oracledb.DB_TYPE_TIMESTAMP_LTZ):
+            return cursor.var(oracledb.DB_TYPE_VARCHAR, arraysize=cursor.arraysize)
+
     def _connect(self):
         import oracledb
         try:
-            return oracledb.connect(params=self._params())
+            conn = oracledb.connect(params=self._params())
+            conn.outputtypehandler = self._tz_string_handler
+            return conn
         except Exception as exc:  # oracledb.Error or ssl/socket errors
             raise DataConnectError(f"Data Connect connect failed: {exc}") from exc
 
