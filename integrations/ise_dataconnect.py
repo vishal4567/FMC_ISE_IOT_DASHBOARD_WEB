@@ -223,6 +223,34 @@ class DataConnectClient:
         _, rows = self.query(f"SELECT COUNT(*) AS n FROM {view}")
         return rows[0]["n"] if rows else None
 
+    def sessions_for_macs(self, macs, view, columns, *, mac_col="calling_station_id",
+                          extra_where=""):
+        """Sessions for ONLY the given MACs, via an indexed
+        ``calling_station_id IN (…)`` filter (batched). This removes non-IoT
+        devices in the query rather than after. ``extra_where`` lets you scope to
+        active/current records. ``location`` fields get leaf-extracted."""
+        want = [m.upper() for m in macs if m]
+        out = []
+        n = (len(want) + 899) // 900
+        with self.session():
+            for bi, i in enumerate(range(0, len(want), 900), 1):
+                chunk = want[i:i + 900]
+                self._say(f"[dc] sessions batch {bi}/{n} ({len(chunk)} MACs)")
+                binds = {f"m{j}": m for j, m in enumerate(chunk)}
+                where = f"{mac_col} IN ({', '.join(f':{k}' for k in binds)})"
+                if extra_where:
+                    where += f" AND {extra_where}"
+                try:
+                    _, rows = self.query(
+                        f"SELECT {', '.join(columns)} FROM {view} WHERE {where}", binds)
+                except DataConnectError:
+                    continue
+                for r in rows:
+                    if "location" in r:
+                        r["location"] = _loc_leaf(r.get("location"))
+                    out.append(r)
+        return out
+
     def rows(self, view, columns, *, where="", binds=None, order="", limit=0):
         """Simple SELECT of named columns (avoids SELECT * so odd columns can't
         break the fetch). Returns list[dict]."""

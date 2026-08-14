@@ -323,6 +323,13 @@ DATACONNECT = {
     # current-state); 7-30 for the full RADIUS_AUTHENTICATIONS log.
     "LOCATION_DAYS": _env_int("ISE_DC_LOCATION_DAYS", 0),
     "COL_LOC_TIME": os.environ.get("ISE_DC_COL_LOC_TIME", "timestamp"),
+    # 'ISE Sessions' report = active/current sessions for IoT devices ONLY. It's
+    # filtered by the IoT MAC set (indexed calling_station_id IN), so non-IoT
+    # devices are removed in the query. Default source is the current-state
+    # summary. SESSIONS_WHERE optionally scopes to active records (e.g. on
+    # radius_accounting: "acct_status_type <> 'Stop'").
+    "SESSIONS_VIEW": os.environ.get("ISE_DC_SESSIONS_VIEW", "radius_authentication_summary"),
+    "SESSIONS_WHERE": os.environ.get("ISE_DC_SESSIONS_WHERE", ""),
 }
 
 # ---------------------------------------------------------------------------

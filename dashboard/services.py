@@ -178,14 +178,20 @@ def _ise_profiles():
 
 
 def _ise_sessions():
-    # Recent RADIUS auth sessions (endpoint identity + NAS + location + IP).
+    # Active/current sessions for IoT devices ONLY: filter the session view by the
+    # synced IoT MAC set (indexed calling_station_id IN), so non-IoT devices are
+    # removed in the query. Needs the IoT inventory populated (run sync_ise first).
     if _dc_on():
-        return get_dataconnect_client().rows(
-            "radius_authentications",
-            ["calling_station_id", "username", "endpoint_profile", "device_type",
-             "location", "nas_ip_address", "framed_ip_address", "identity_group",
-             "passed", "failed"],
-            order="timestamp DESC", limit=500)
+        from dashboard.models import IoTDevice
+        macs = list(IoTDevice.objects.values_list("mac", flat=True))
+        if not macs:
+            return []
+        dc = settings.DATACONNECT
+        return get_dataconnect_client().sessions_for_macs(
+            macs, dc["SESSIONS_VIEW"],
+            ["calling_station_id", "endpoint_profile", "device_type", "location",
+             "nas_ip_address", "framed_ip_address", "identity_group"],
+            extra_where=dc["SESSIONS_WHERE"])
     return get_ise_client().get_active_sessions()
 
 
