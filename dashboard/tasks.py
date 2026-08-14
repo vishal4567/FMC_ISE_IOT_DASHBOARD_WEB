@@ -230,7 +230,8 @@ def sync_iot_endpoints(log=None) -> dict:
         try:
             dc_loc = dc.location_by_mac(
                 macs, view=dc_cfg["LOCATION_VIEW"],
-                mac_col=dc_cfg["COL_LOC_MAC"], loc_col=dc_cfg["COL_LOC_SITE"])
+                mac_col=dc_cfg["COL_LOC_MAC"], loc_col=dc_cfg["COL_LOC_SITE"],
+                days=dc_cfg["LOCATION_DAYS"], time_col=dc_cfg["COL_LOC_TIME"])
             say(f"[sync] location resolved for {len(dc_loc)} devices")
             for r in base_rows:
                 if not r.get("site"):

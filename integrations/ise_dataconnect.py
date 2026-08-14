@@ -270,25 +270,28 @@ class DataConnectClient:
         return out
 
     def location_by_mac(self, macs, *, view="radius_authentications",
-                        mac_col="calling_station_id", loc_col="location"):
-        """``{MAC: site}`` from a RADIUS view - one row per MAC. Filters the MAC
-        column DIRECTLY (no UPPER() wrapper) so ISE can use its index; batches
-        the MAC list (Oracle IN caps at 1000). For speed prefer a summary view
-        (radius_authentication_summary) over the full auth log."""
+                        mac_col="calling_station_id", loc_col="location",
+                        days=0, time_col="timestamp"):
+        """``{MAC: site}`` from a RADIUS view - one row per MAC. Optimisations:
+        - filter the MAC column DIRECTLY (no UPPER()) so its index is used;
+        - optional ``days`` window on ``time_col`` so a time-partitioned auth log
+          is partition-pruned (what ISE's own dashboards do) - huge on the full
+          radius_authentications; batches the MAC list (Oracle IN caps at 1000)."""
         want = [m.upper() for m in macs if m]
         out = {}
         n_batches = (len(want) + 899) // 900
+        window = (f" AND {time_col} >= SYSTIMESTAMP - INTERVAL '{int(days)}' DAY"
+                  if days and time_col else "")
         with self.session():   # reuse one connection across all batches
             for bi, i in enumerate(range(0, len(want), 900), 1):
                 chunk = want[i:i + 900]
-                self._say(f"[dc] location batch {bi}/{n_batches} ({len(chunk)} MACs)")
+                self._say(f"[dc] location batch {bi}/{n_batches} ({len(chunk)} MACs"
+                          + (f", last {days}d)" if days else ")"))
                 binds = {f"m{j}": m for j, m in enumerate(chunk)}
                 inlist = ", ".join(f":{k}" for k in binds)
-                # No UPPER() on the column -> index-usable. ISE stores MACs
-                # uppercase with colons, matching our uppercased binds.
                 sql = (f"SELECT {mac_col} AS mac, MAX({loc_col}) AS site "
                        f"FROM {view} WHERE {mac_col} IN ({inlist}) "
-                       f"AND {loc_col} IS NOT NULL GROUP BY {mac_col}")
+                       f"AND {loc_col} IS NOT NULL{window} GROUP BY {mac_col}")
                 try:
                     _, rows = self.query(sql, binds)
                 except DataConnectError:

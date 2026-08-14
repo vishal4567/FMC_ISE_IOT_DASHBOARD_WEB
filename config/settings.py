@@ -315,6 +315,10 @@ DATACONNECT = {
     "LOCATION_VIEW": os.environ.get("ISE_DC_LOCATION_VIEW", "radius_authentications"),
     "COL_LOC_MAC": os.environ.get("ISE_DC_COL_LOC_MAC", "calling_station_id"),
     "COL_LOC_SITE": os.environ.get("ISE_DC_COL_LOC_SITE", "location"),
+    # Only look back this many days in the auth log (partition pruning -> fast).
+    # 0 = whole table. 7-30 is plenty; a connected device auth'd recently.
+    "LOCATION_DAYS": _env_int("ISE_DC_LOCATION_DAYS", 7),
+    "COL_LOC_TIME": os.environ.get("ISE_DC_COL_LOC_TIME", "timestamp"),
 }
 
 # ---------------------------------------------------------------------------
