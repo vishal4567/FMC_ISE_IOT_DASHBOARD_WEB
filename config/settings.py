@@ -312,12 +312,16 @@ DATACONNECT = {
     # Location via SQL from RADIUS_AUTHENTICATIONS(CALLING_STATION_ID -> LOCATION),
     # so we never walk NADs / call MnT. Set LOCATION empty to fall back to the
     # endpoint IP + SITE_SUBNETS instead.
-    "LOCATION_VIEW": os.environ.get("ISE_DC_LOCATION_VIEW", "radius_authentications"),
+    # RADIUS_AUTHENTICATION_SUMMARY is the aggregated current-state view (~one row
+    # per endpoint with location/device_type/IP) - Cisco's recommended, fast
+    # source. Alternatives: RADIUS_AUTHENTICATIONS_WEEK (last-week detail) or the
+    # full RADIUS_AUTHENTICATIONS (use LOCATION_DAYS to time-bound it).
+    "LOCATION_VIEW": os.environ.get("ISE_DC_LOCATION_VIEW", "radius_authentication_summary"),
     "COL_LOC_MAC": os.environ.get("ISE_DC_COL_LOC_MAC", "calling_station_id"),
     "COL_LOC_SITE": os.environ.get("ISE_DC_COL_LOC_SITE", "location"),
-    # Only look back this many days in the auth log (partition pruning -> fast).
-    # 0 = whole table. 7-30 is plenty; a connected device auth'd recently.
-    "LOCATION_DAYS": _env_int("ISE_DC_LOCATION_DAYS", 7),
+    # Days to look back (partition pruning). 0 for the SUMMARY view (already
+    # current-state); 7-30 for the full RADIUS_AUTHENTICATIONS log.
+    "LOCATION_DAYS": _env_int("ISE_DC_LOCATION_DAYS", 0),
     "COL_LOC_TIME": os.environ.get("ISE_DC_COL_LOC_TIME", "timestamp"),
 }
 
