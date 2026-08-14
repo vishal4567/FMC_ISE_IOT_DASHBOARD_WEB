@@ -71,6 +71,19 @@ def get_ise_client() -> ISEClient:
     return client
 
 
+def get_dataconnect_client():
+    """ISE Data Connect client (built from settings.DATACONNECT). Lazily imported
+    so python-oracledb is only needed when Data Connect is actually used."""
+    from integrations.ise_dataconnect import DataConnectClient
+
+    cfg = settings.DATACONNECT
+    return DataConnectClient(
+        host=cfg["HOST"], password=cfg["PASSWORD"], port=cfg["PORT"],
+        service_name=cfg["SERVICE_NAME"], user=cfg["USER"],
+        verify_tls=cfg["VERIFY_TLS"], ca_cert=cfg["CA_CERT"], timeout=cfg["TIMEOUT"],
+    )
+
+
 def get_fmc_client() -> FMCClient:
     cfg = settings.FMC
     key = _fmc_cache_key(cfg)

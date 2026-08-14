@@ -280,6 +280,36 @@ ISE = {
 }
 
 # ---------------------------------------------------------------------------
+# Cisco ISE Data Connect (read-only SQL over ISE's reporting DB)
+#
+# Recommended for bulk endpoint retrieval at large scale (millions of endpoints)
+# where ERS/Open API filtering is too slow. When USE_FOR_DISCOVERY is on, the
+# IoT sync discovers endpoints via one SQL query instead of REST paging.
+# Confirm the schema/columns first with:  manage.py probe_dataconnect
+# ---------------------------------------------------------------------------
+DATACONNECT = {
+    "ENABLED": _env_bool("ISE_DATACONNECT_ENABLED", False),
+    "HOST": os.environ.get("ISE_DATACONNECT_HOST", ""),
+    "PORT": _env_int("ISE_DATACONNECT_PORT", 2484),
+    "SERVICE_NAME": os.environ.get("ISE_DATACONNECT_SERVICE", "cpm10"),
+    "USER": os.environ.get("ISE_DATACONNECT_USER", "dataconnect"),
+    "PASSWORD": os.environ.get("ISE_DATACONNECT_PASSWORD", ""),
+    "VERIFY_TLS": _env_bool("ISE_DATACONNECT_VERIFY_TLS", False),
+    "CA_CERT": os.environ.get("ISE_DATACONNECT_CA_CERT", ""),
+    "TIMEOUT": _env_int("ISE_DATACONNECT_TIMEOUT", 60),
+    # Use Data Connect as the IoT-endpoint discovery source for the sync.
+    "USE_FOR_DISCOVERY": _env_bool("ISE_USE_DATACONNECT", False),
+    # Schema mapping (set from probe_dataconnect output; defaults are guesses).
+    "ENDPOINTS_VIEW": os.environ.get("ISE_DC_ENDPOINTS_VIEW", "endpoints_data"),
+    "COL_MAC": os.environ.get("ISE_DC_COL_MAC", "mac_address"),
+    "COL_PROFILE": os.environ.get("ISE_DC_COL_PROFILE", "endpoint_policy"),
+    "COL_GROUP": os.environ.get("ISE_DC_COL_GROUP", ""),
+    "COL_DEVICETYPE": os.environ.get("ISE_DC_COL_DEVICETYPE", ""),
+    "COL_IP": os.environ.get("ISE_DC_COL_IP", ""),
+    "COL_SITE": os.environ.get("ISE_DC_COL_SITE", ""),
+}
+
+# ---------------------------------------------------------------------------
 # Cisco FMC configuration
 # ---------------------------------------------------------------------------
 FMC = {

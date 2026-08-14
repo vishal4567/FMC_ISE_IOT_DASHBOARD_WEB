@@ -6,4 +6,5 @@ psycopg[binary]>=3.1    # PostgreSQL driver
 redis>=5.0              # cache + Celery broker/result client
 celery>=5.3             # background workers + beat
 whitenoise>=6.6         # static file serving behind gunicorn
+python-oracledb>=2.0    # ISE Data Connect (thin mode; no Oracle client needed)
 waitress>=3.0; platform_system == "Windows"   # Windows WSGI server (gunicorn is Unix-only)

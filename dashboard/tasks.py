@@ -140,9 +140,28 @@ def sync_iot_endpoints(log=None) -> dict:
     workers = cfg["SYNC_WORKERS"]
     profile_ids = list(profile_map.keys())
 
-    # 1. Discover IoT endpoints. Open API (primary): deviceType/vendor/ipAddress
-    #    inline. ERS (fallback): light refs then per-endpoint detail.
-    if cfg["USE_OPENAPI"]:
+    dc_cfg = settings.DATACONNECT
+    dc_mode = dc_cfg["USE_FOR_DISCOVERY"]
+
+    # 1. Discover IoT endpoints. Data Connect (SQL, best at scale) if enabled;
+    #    else Open API (deviceType inline) or ERS (group/logical/profileId filter).
+    if dc_mode:
+        names = list(profile_map.values()) or cfg["IOT_PROFILES"]
+        say(f"[sync] discovering via ISE Data Connect SQL "
+            f"(view {dc_cfg['ENDPOINTS_VIEW']}, {len(names)} profiles)...")
+        try:
+            dc = services.get_dataconnect_client()
+            base_rows = dc.iot_endpoints(
+                names, view=dc_cfg["ENDPOINTS_VIEW"], col_mac=dc_cfg["COL_MAC"],
+                col_profile=dc_cfg["COL_PROFILE"], col_group=dc_cfg["COL_GROUP"],
+                col_devicetype=dc_cfg["COL_DEVICETYPE"], col_ip=dc_cfg["COL_IP"],
+                col_site=dc_cfg["COL_SITE"])
+        except Exception as exc:
+            return {"error": f"Data Connect discovery failed: {exc}"}
+        say(f"[sync] Data Connect returned {len(base_rows)} IoT endpoints")
+        if not base_rows:
+            return {"iot_endpoints": 0, "note": "Data Connect returned no IoT endpoints"}
+    elif cfg["USE_OPENAPI"]:
         mode = "scan-all + client filter" if cfg["OPENAPI_SCAN_ALL"] else "profileId filter"
         say(f"[sync] discovering IoT endpoints via Open API {mode} "
             f"(page size {cfg['OPENAPI_PAGE_SIZE']}, timeout {cfg['TIMEOUT']}s)...")
@@ -174,10 +193,11 @@ def sync_iot_endpoints(log=None) -> dict:
             return {"error": f"ERS endpoint fetch failed: {exc}"}
         base_rows = None
         _refs = list(refs.values())
-    if cfg["USE_OPENAPI"] and not base_rows:
-        return {"iot_endpoints": 0, "note": "no endpoints matched the allow-list"}
-    if not cfg["USE_OPENAPI"] and not _refs:
-        return {"iot_endpoints": 0, "note": "no endpoints matched the allow-list"}
+    if not dc_mode:
+        if cfg["USE_OPENAPI"] and not base_rows:
+            return {"iot_endpoints": 0, "note": "no endpoints matched the allow-list"}
+        if not cfg["USE_OPENAPI"] and not _refs:
+            return {"iot_endpoints": 0, "note": "no endpoints matched the allow-list"}
 
     # 2. Per-endpoint: (ERS-path) enrich detail; optional ERS device-type
     #    backfill; resolve site. Parallelised.
@@ -203,7 +223,26 @@ def sync_iot_endpoints(log=None) -> dict:
         _resolve_site(ise, row, method, nad_map, subnets)
         return row
 
-    if cfg["USE_OPENAPI"]:
+    def build_dc(row):
+        # Data Connect SQL already returned profile (+ device type / ip / site if
+        # those columns were mapped). Backfill only what's missing.
+        if not row.get("device_type"):
+            if ers_enrich:
+                try:
+                    row["device_type"] = ise.mfc_device_type(
+                        ise.endpoint_detail_by_mac(row["mac"]))
+                except Exception:
+                    pass
+            row["device_type"] = row.get("device_type") or row.get("endpoint_profile", "")
+        row.setdefault("endpoint_id", "")
+        row.setdefault("manufacturer", "")
+        if not row.get("site"):
+            _resolve_site(ise, row, method, nad_map, subnets)
+        return row
+
+    if dc_mode:
+        work, fn = base_rows, build_dc
+    elif cfg["USE_OPENAPI"]:
         work, fn = base_rows, build_openapi
     else:
         work, fn = _refs, build_ers
