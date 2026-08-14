@@ -246,6 +246,15 @@ ISE = {
     # Open-API-path only: backfill the (blank) device type from ERS
     # mfcAttributes. Ignored by the ERS path, which always reads mfcAttributes.
     "ERS_ENRICH": _env_bool("ISE_ERS_ENRICH", True),
+    # ERS-path DISCOVERY BY IDENTITY GROUP (best at very large scale). Endpoint
+    # group membership is indexed in ISE, so filter=groupId.EQ.<id> avoids the
+    # full-table scan that profileId does. Set to the IoT endpoint identity group
+    # names (e.g. Wipro_CCTV,BMS_Devices,Access-Control). Takes precedence over
+    # logical/profileId discovery on the ERS path. Confirm it's fast with
+    # `probe_apis` (ers_by_groupId timing) first.
+    "IOT_GROUPS": [
+        g.strip() for g in os.environ.get("ISE_IOT_GROUPS", "").split(",") if g.strip()
+    ],
     # ERS-path only: filter by logicalProfileName instead of profileId. Both are
     # documented ERS endpoint filters; logical is fewer calls (3 vs 21). Blank ->
     # filter by profileId. Ignored when USE_OPENAPI is True.

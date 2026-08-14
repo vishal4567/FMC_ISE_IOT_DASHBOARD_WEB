@@ -299,34 +299,61 @@ class Command(BaseCommand):
             except Exception as exc:
                 out["tried"]["resolve_profile_id"] = str(exc)[:120]
 
-        # b) ERS by profileId
-        if pid:
-            try:
-                res = ise._ers_get("/endpoint", {"filter": f"profileId.EQ.{pid}", "size": size})
-                out["counts"]["ers_by_profileId"] = (
-                    (res.get("SearchResult", {}) or {}).get("total"))
-                out["tried"]["ers_by_profileId"] = "ok"
-            except Exception as exc:
-                out["tried"]["ers_by_profileId"] = str(exc)[:120]
+        # Time each filter method so we can see which one ISE answers WITHOUT a
+        # full-table scan (the only viable path at 1.4M endpoints). Whichever is
+        # fast is the one to use for discovery.
+        import time as _t
 
-        # c) ERS by logicalProfileName
-        lp = (cfg.get("IOT_LOGICAL_PROFILES") or [""])[0]
+        def timed(label, fn):
+            t = _t.monotonic()
+            try:
+                val = fn()
+                out["tried"][label] = f"ok ({round(_t.monotonic()-t,1)}s)"
+                return val
+            except Exception as exc:
+                out["tried"][label] = f"ERR ({round(_t.monotonic()-t,1)}s) {str(exc)[:70]}"
+                return None
+
+        def ers_total(params):
+            r = ise._ers_get("/endpoint", params)
+            return (r.get("SearchResult", {}) or {}).get("total")
+
+        # b) ERS filter by profileId (slow if profileId isn't indexed)
+        if pid:
+            v = timed("ers_by_profileId", lambda: ers_total({"filter": f"profileId.EQ.{pid}", "size": size}))
+            if v is not None:
+                out["counts"]["ers_by_profileId"] = v
+
+        # c) ERS filter by logicalProfileName
+        lp = (cfg.get("IOT_LOGICAL_PROFILES") or ["Wipro_CCTV"])[0]
         if lp:
-            try:
-                res = ise._ers_get("/endpoint", {"filter": f"logicalProfileName.EQ.{lp}", "size": size})
-                out["counts"]["ers_by_logicalProfile"] = (
-                    (res.get("SearchResult", {}) or {}).get("total"))
-                out["tried"][f"ers_by_logicalProfile:{lp}"] = "ok"
-            except Exception as exc:
-                out["tried"][f"ers_by_logicalProfile:{lp}"] = str(exc)[:120]
+            v = timed(f"ers_by_logicalProfile[{lp}]",
+                      lambda: ers_total({"filter": f"logicalProfileName.EQ.{lp}", "size": size}))
+            if v is not None:
+                out["counts"]["ers_by_logicalProfile"] = v
 
-        # d) Open API by profileId - dump the FIRST FULL object untruncated so we
-        #    can see whether deviceType / vendor / ipAddress populate (=> no ERS).
+        # c2) ERS filter by groupId (identity-group membership - usually indexed = fast)
+        gid = ""
+        try:
+            gr = ise._ers_get("/endpointgroup", {"filter": f"name.EQ.{lp}", "size": 1})
+            gres = (gr.get("SearchResult", {}) or {}).get("resources", [])
+            gid = gres[0]["id"] if gres else ""
+            out["resolved_group"] = {lp: gid} if gid else {"note": f"no identity group named {lp}"}
+        except Exception as exc:
+            out["tried"]["resolve_group_id"] = str(exc)[:80]
+        if gid:
+            v = timed(f"ers_by_groupId[{lp}]",
+                      lambda: ers_total({"filter": f"groupId.EQ.{gid}", "size": size}))
+            if v is not None:
+                out["counts"]["ers_by_groupId"] = v
+
+        # d) Open API by profileId - also dump one object to confirm field presence.
         if pid:
-            try:
+            def _oa():
                 raw = ise._openapi_get("/endpoint", {"filter": f"profileId.EQ.{pid}", "size": size})
-                items = ise._openapi_items(raw)
-                out["tried"]["openapi_by_profileId"] = "ok"
+                return ise._openapi_items(raw)
+            items = timed("openapi_by_profileId", _oa)
+            if items is not None:
                 out["counts"]["openapi_by_profileId"] = len(items)
                 first = items[0] if items else {}
                 out["openapi_first_full"] = first
@@ -335,8 +362,6 @@ class Command(BaseCommand):
                     for k in ("profileId", "deviceType", "vendor", "ipAddress",
                               "productId", "hardwareRevision", "customAttributes")
                 }
-            except Exception as exc:
-                out["tried"]["openapi_by_profileId"] = str(exc)[:150]
         return out
 
     def _openapi(self, ise, path, params):

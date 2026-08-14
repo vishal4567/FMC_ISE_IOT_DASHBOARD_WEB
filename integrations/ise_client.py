@@ -194,6 +194,38 @@ class ISEClient:
             say(f"    [{i}/{len(pids)}] {len(refs)} MACs so far ({round(time.monotonic()-t,1)}s)")
         return refs
 
+    def resolve_group_ids(self, names):
+        """Map endpoint identity-group *names* -> ids via a single filtered call
+        each (fast). Returns ``{id: name}`` for names that exist."""
+        out = {}
+        for n in names:
+            if not n:
+                continue
+            try:
+                r = self._ers_get("/endpointgroup", {"filter": f"name.EQ.{n}", "size": 1})
+                res = (r.get("SearchResult", {}) or {}).get("resources", [])
+                if res:
+                    out[res[0]["id"]] = n
+            except IntegrationError:
+                pass
+        return out
+
+    def iot_endpoint_refs_by_group(self, group_ids, log=None):
+        """Light ``{MAC: {id, mac, group_id}}`` for endpoints in the given identity
+        groups, via ERS ``filter=groupId.EQ.<id>`` (indexed = fast at scale)."""
+        say = log if callable(log) else (lambda *a, **k: None)
+        refs = {}
+        gids = [g for g in group_ids if g]
+        for i, gid in enumerate(gids, 1):
+            t = time.monotonic()
+            say(f"    [{i}/{len(gids)}] ERS filter=groupId.EQ.{gid} (page size {self.page_size})...")
+            for e in self._ers_collection("/endpoint", {"filter": f"groupId.EQ.{gid}"}):
+                mac = (e.get("name") or "").upper()
+                if mac:
+                    refs.setdefault(mac, {"id": e.get("id", ""), "mac": mac})["group_id"] = gid
+            say(f"    [{i}/{len(gids)}] {len(refs)} MACs so far ({round(time.monotonic()-t,1)}s)")
+        return refs
+
     def endpoint_detail(self, endpoint_id):
         """Full ERS endpoint object (incl. ``mfcAttributes`` + ``profileId``)."""
         data = self._ers_get(f"/endpoint/{endpoint_id}")
