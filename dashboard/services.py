@@ -496,19 +496,31 @@ def fetch_dataset_live(key: str) -> dict:
                 f"Unexpected error fetching {key}: {exc}", "cached": False}
 
 
-def snapshot_all_datasets() -> dict:
+def snapshot_all_datasets(log=None) -> dict:
     """Fetch every external dataset live and persist it as a DB snapshot. Called
-    by the scheduler (and the snapshot_datasets management command)."""
+    by the scheduler (and the snapshot_datasets management command). Pass
+    log=print for a per-dataset progress line with timing."""
+    import time
+
+    say = log if callable(log) else (lambda *a, **k: None)
+    external = [ds for ds in DATASETS.values() if not getattr(ds, "derived", False)]
+    say(f"[snapshot] {len(external)} external ISE/FMC datasets to fetch...")
     n, errors = 0, 0
-    for ds in DATASETS.values():
-        if getattr(ds, "derived", False):
-            continue  # DB-derived: read live from the DB at request time
+    for ds in external:
+        say(f"[snapshot]   fetching {ds.key} ({ds.source})...")
+        t = time.monotonic()
         payload = fetch_dataset_live(ds.key)
         save_snapshot(f"dataset:{ds.key}", payload)
+        secs = round(time.monotonic() - t, 1)
         n += 1
         if payload.get("error"):
             errors += 1
+            say(f"[snapshot]     {ds.key}: ERROR ({secs}s) {str(payload['error'])[:80]}")
+        else:
+            say(f"[snapshot]     {ds.key}: {len(payload['rows'])} rows ({secs}s)")
+    say("[snapshot]   probing ISE/FMC connectivity...")
     save_snapshot("connection_status", connection_status_live())
+    say(f"[snapshot] done: {n} datasets, {errors} with errors")
     return {"datasets": n, "errors": errors}
 
 

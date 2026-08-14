@@ -20,14 +20,16 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         from dashboard.tasks import refresh_ise_reference, sync_iot_endpoints
 
-        if not opts["sync_only"]:
-            self.stdout.write("→ refresh_ise_reference ...", ending=" ")
+        def log(msg):
+            self.stdout.write(msg)
             self.stdout.flush()
-            self.stdout.write(self.style.SUCCESS(str(refresh_ise_reference())))
+
+        if not opts["sync_only"]:
+            log("=== refresh_ise_reference ===")
+            log(self.style.SUCCESS(str(refresh_ise_reference(log=log))))
         if opts["ref_only"]:
             return
-        self.stdout.write("→ sync_iot_endpoints ...", ending=" ")
-        self.stdout.flush()
-        res = sync_iot_endpoints()
+        log("=== sync_iot_endpoints ===")
+        res = sync_iot_endpoints(log=log)
         style = self.style.SUCCESS if not res.get("error") else self.style.ERROR
-        self.stdout.write(style(str(res)))
+        log(style(str(res)))

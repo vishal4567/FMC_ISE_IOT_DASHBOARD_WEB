@@ -13,8 +13,11 @@ class Command(BaseCommand):
     def handle(self, *args, **opts):
         from dashboard import services
 
-        self.stdout.write("Snapshotting ISE/FMC datasets ...")
-        res = services.snapshot_all_datasets()
-        self.stdout.write(self.style.SUCCESS(
+        def log(msg):
+            self.stdout.write(msg)
+            self.stdout.flush()
+
+        res = services.snapshot_all_datasets(log=log)
+        log(self.style.SUCCESS(
             f"Done: {res['datasets']} datasets ({res['errors']} with errors) "
             f"+ connection status written to the DB."))

@@ -52,42 +52,54 @@ _REFERENCE_TTL = 60 * 60 * 30                 # 30h - survives a missed daily ru
 # Daily reference data
 # --------------------------------------------------------------------------- #
 @shared_task(name="dashboard.tasks.refresh_ise_reference")
-def refresh_ise_reference() -> dict:
+def _logger(log):
+    """Return a callable progress logger (no-op when called from Celery)."""
+    return log if callable(log) else (lambda *a, **k: None)
+
+
+def refresh_ise_reference(log=None) -> dict:
     """Resolve IoT profile ids + rebuild the NAD->Location map, cached for the
-    hourly sync. Runs daily (reference data changes rarely)."""
+    hourly sync. Runs daily (reference data changes rarely). Pass log=print (or a
+    command's stdout writer) for live progress."""
     from django.conf import settings
     from django.core.cache import cache
     from dashboard import services
 
+    say = _logger(log)
     try:
         ise = services.get_ise_client()
     except Exception as exc:
         return {"error": str(exc)}
 
     result = {}
-    # Profile name -> id resolution (only needed when NOT using logical profiles,
-    # but we resolve anyway so device-type fallback can name a profileId).
     try:
         configured = settings.ISE["IOT_PROFILES"]
+        say(f"[reference] resolving {len(configured)} IoT profile names -> ids "
+            f"(reads the full ISE profiler catalogue, can take ~30-60s)...")
         profile_map = ise.resolve_profile_ids(configured)
         cache.set(_CK_PROFILE_MAP, profile_map, _REFERENCE_TTL)
         result["iot_profiles_resolved"] = len(profile_map)
-        # Surface any configured name that didn't match a real ISE profile
-        # (typo / renamed / not in this deployment) instead of silently ignoring.
+        say(f"[reference] resolved {len(profile_map)}/{len(configured)} profiles")
         resolved_names = {n.lower() for n in profile_map.values()}
         unmatched = [n for n in configured if n.lower() not in resolved_names]
         if unmatched:
             result["iot_profiles_unmatched"] = unmatched
+            say(f"[reference] NOT found in ISE: {', '.join(unmatched)}")
     except Exception as exc:
         result["profile_error"] = str(exc)
+        say(f"[reference] profile resolution error: {exc}")
 
     if settings.ISE["LOCATION_METHOD"] == "session":
         try:
+            say("[reference] building NAD -> Location map "
+                "(fetching every network device, this is the slow part)...")
             nad_map = ise.nad_location_map()
             cache.set(_CK_NAD_LOCATION, nad_map, _REFERENCE_TTL)
             result["nad_locations"] = len(nad_map)
+            say(f"[reference] NAD map: {len(nad_map)} IP/name -> site entries")
         except Exception as exc:
             result["nad_error"] = str(exc)
+            say(f"[reference] NAD map error: {exc}")
     return result
 
 
@@ -95,15 +107,17 @@ def refresh_ise_reference() -> dict:
 # Hourly IoT endpoint sync
 # --------------------------------------------------------------------------- #
 @shared_task(name="dashboard.tasks.sync_iot_endpoints")
-def sync_iot_endpoints() -> dict:
+def sync_iot_endpoints(log=None) -> dict:
     """Sync the IoT endpoint inventory (allow-listed profiles only) into
-    IoTDevice, with device type + site. Source of truth for event enrichment."""
+    IoTDevice, with device type + site. Source of truth for event enrichment.
+    Pass log=print for live progress."""
     from django.conf import settings
     from django.core.cache import cache
     from django.utils import timezone
     from dashboard import services
     from dashboard.models import IoTDevice
 
+    say = _logger(log)
     cfg = settings.ISE
     try:
         ise = services.get_ise_client()
@@ -113,9 +127,13 @@ def sync_iot_endpoints() -> dict:
     # Reference data (fall back to computing inline if the daily run hasn't fired).
     profile_map = cache.get(_CK_PROFILE_MAP)
     if profile_map is None:
+        say("[sync] reference cache empty - resolving IoT profiles now "
+            "(reads the profiler catalogue, ~30-60s)...")
         profile_map = ise.resolve_profile_ids(cfg["IOT_PROFILES"])
         cache.set(_CK_PROFILE_MAP, profile_map, _REFERENCE_TTL)
     nad_map = cache.get(_CK_NAD_LOCATION) or {}
+    say(f"[sync] {len(profile_map)} IoT profiles; location={cfg['LOCATION_METHOD']}; "
+        f"NAD map={len(nad_map)} entries; workers={cfg['SYNC_WORKERS']}")
 
     subnets = _parse_site_subnets(cfg["SITE_SUBNETS"])
     method = cfg["LOCATION_METHOD"]
@@ -125,6 +143,7 @@ def sync_iot_endpoints() -> dict:
     # 1. Discover IoT endpoints. Open API (primary): deviceType/vendor/ipAddress
     #    inline. ERS (fallback): light refs then per-endpoint detail.
     if cfg["USE_OPENAPI"]:
+        say("[sync] discovering IoT endpoints via Open API profileId filter...")
         try:
             objs = ise.openapi_iot_endpoints(profile_ids)
         except Exception as exc:
@@ -132,6 +151,8 @@ def sync_iot_endpoints() -> dict:
         base_rows = [ise.map_openapi_endpoint(o, profile_map) for o in objs.values()]
     else:
         logical = cfg.get("IOT_LOGICAL_PROFILES") or []
+        how = f"logicalProfileName ({len(logical)})" if logical else f"profileId ({len(profile_ids)})"
+        say(f"[sync] discovering IoT endpoints via ERS {how} filter...")
         try:
             refs = (ise.iot_endpoint_refs(logical_profiles=logical) if logical
                     else ise.iot_endpoint_refs(profile_ids=profile_ids))
@@ -173,15 +194,25 @@ def sync_iot_endpoints() -> dict:
     else:
         work, fn = _refs, build_ers
 
+    total = len(work)
+    say(f"[sync] {total} IoT endpoints found; enriching (device type + "
+        f"{'session/location' if method != 'off' else 'no location'}) "
+        f"with {workers} workers...")
     rows = []
+    done = 0
+    step = max(25, total // 20)   # ~20 progress lines
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for fut in as_completed([pool.submit(fn, w) for w in work]):
+            done += 1
             try:
                 rows.append(fut.result())
             except Exception:
-                continue
+                pass
+            if done % step == 0 or done == total:
+                say(f"[sync]   enriched {done}/{total}")
 
     # 4. Upsert.
+    say(f"[sync] writing {len(rows)} devices to IoTDevice...")
     now = timezone.now()
     n = 0
     seen = set()
@@ -267,13 +298,13 @@ def _site_for_ip(ip: str, subnets) -> str:
 # FMC + maintenance
 # --------------------------------------------------------------------------- #
 @shared_task(name="dashboard.tasks.snapshot_datasets")
-def snapshot_datasets() -> dict:
+def snapshot_datasets(log=None) -> dict:
     """Fetch every external ISE/FMC dataset live and persist it to the DB
     Snapshot table (+ a connectivity probe). The web tier reads only these
     snapshots, so requests never wait on ISE/FMC."""
     from dashboard import services
 
-    return services.snapshot_all_datasets()
+    return services.snapshot_all_datasets(log=log)
 
 
 @shared_task(name="dashboard.tasks.rollup_hourly")
