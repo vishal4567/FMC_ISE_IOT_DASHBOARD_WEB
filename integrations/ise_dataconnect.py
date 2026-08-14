@@ -271,8 +271,10 @@ class DataConnectClient:
 
     def location_by_mac(self, macs, *, view="radius_authentications",
                         mac_col="calling_station_id", loc_col="location"):
-        """``{MAC: site}`` from the RADIUS view - one row per MAC (any non-null
-        location). Batches the MAC list (Oracle IN caps at 1000)."""
+        """``{MAC: site}`` from a RADIUS view - one row per MAC. Filters the MAC
+        column DIRECTLY (no UPPER() wrapper) so ISE can use its index; batches
+        the MAC list (Oracle IN caps at 1000). For speed prefer a summary view
+        (radius_authentication_summary) over the full auth log."""
         want = [m.upper() for m in macs if m]
         out = {}
         n_batches = (len(want) + 899) // 900
@@ -282,9 +284,11 @@ class DataConnectClient:
                 self._say(f"[dc] location batch {bi}/{n_batches} ({len(chunk)} MACs)")
                 binds = {f"m{j}": m for j, m in enumerate(chunk)}
                 inlist = ", ".join(f":{k}" for k in binds)
-                sql = (f"SELECT UPPER({mac_col}) AS mac, MAX({loc_col}) AS site "
-                       f"FROM {view} WHERE UPPER({mac_col}) IN ({inlist}) "
-                       f"AND {loc_col} IS NOT NULL GROUP BY UPPER({mac_col})")
+                # No UPPER() on the column -> index-usable. ISE stores MACs
+                # uppercase with colons, matching our uppercased binds.
+                sql = (f"SELECT {mac_col} AS mac, MAX({loc_col}) AS site "
+                       f"FROM {view} WHERE {mac_col} IN ({inlist}) "
+                       f"AND {loc_col} IS NOT NULL GROUP BY {mac_col}")
                 try:
                     _, rows = self.query(sql, binds)
                 except DataConnectError:
