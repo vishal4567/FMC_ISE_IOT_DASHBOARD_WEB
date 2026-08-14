@@ -199,6 +199,23 @@ def sync_iot_endpoints(log=None) -> dict:
         if not cfg["USE_OPENAPI"] and not _refs:
             return {"iot_endpoints": 0, "note": "no endpoints matched the allow-list"}
 
+    # Data Connect: resolve site for ALL devices in one SQL query (RADIUS view),
+    # instead of a per-device MnT/NAD lookup.
+    if dc_mode and not dc_cfg["COL_SITE"] and method != "off" and dc_cfg["LOCATION_VIEW"]:
+        macs = [r["mac"] for r in base_rows]
+        say(f"[sync] Data Connect: resolving location for {len(macs)} devices "
+            f"via {dc_cfg['LOCATION_VIEW']}...")
+        try:
+            dc_loc = dc.location_by_mac(
+                macs, view=dc_cfg["LOCATION_VIEW"],
+                mac_col=dc_cfg["COL_LOC_MAC"], loc_col=dc_cfg["COL_LOC_SITE"])
+            say(f"[sync] location resolved for {len(dc_loc)} devices")
+            for r in base_rows:
+                if not r.get("site"):
+                    r["site"] = dc_loc.get(r["mac"], "")
+        except Exception as exc:
+            say(f"[sync] Data Connect location query failed: {exc}")
+
     # 2. Per-endpoint: (ERS-path) enrich detail; optional ERS device-type
     #    backfill; resolve site. Parallelised.
     ers_enrich = cfg["ERS_ENRICH"]
@@ -224,20 +241,15 @@ def sync_iot_endpoints(log=None) -> dict:
         return row
 
     def build_dc(row):
-        # Data Connect SQL already returned profile (+ device type / ip / site if
-        # those columns were mapped). Backfill only what's missing.
+        # Data Connect SQL already returned MAC + profile + IP, and site was
+        # bulk-resolved above. device_type defaults to the profile (endpoint
+        # policy). NO per-device REST here - that's the whole point at scale.
         if not row.get("device_type"):
-            if ers_enrich:
-                try:
-                    row["device_type"] = ise.mfc_device_type(
-                        ise.endpoint_detail_by_mac(row["mac"]))
-                except Exception:
-                    pass
-            row["device_type"] = row.get("device_type") or row.get("endpoint_profile", "")
+            row["device_type"] = row.get("endpoint_profile", "")
         row.setdefault("endpoint_id", "")
         row.setdefault("manufacturer", "")
-        if not row.get("site"):
-            _resolve_site(ise, row, method, nad_map, subnets)
+        if not row.get("site") and subnets:   # subnet fallback using the endpoint IP
+            row["site"] = _site_for_ip(row.get("ip", ""), subnets)
         return row
 
     if dc_mode:

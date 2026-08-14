@@ -299,14 +299,22 @@ DATACONNECT = {
     "TIMEOUT": _env_int("ISE_DATACONNECT_TIMEOUT", 60),
     # Use Data Connect as the IoT-endpoint discovery source for the sync.
     "USE_FOR_DISCOVERY": _env_bool("ISE_USE_DATACONNECT", False),
-    # Schema mapping (set from probe_dataconnect output; defaults are guesses).
+    # Schema mapping - defaults match the documented Data Connect views
+    # (developer.cisco.com/docs/dataconnect/database-views). Endpoints:
+    #   ENDPOINTS_DATA(MAC_ADDRESS, ENDPOINT_POLICY, IDENTITY_GROUP_ID, ENDPOINT_IP)
     "ENDPOINTS_VIEW": os.environ.get("ISE_DC_ENDPOINTS_VIEW", "endpoints_data"),
     "COL_MAC": os.environ.get("ISE_DC_COL_MAC", "mac_address"),
     "COL_PROFILE": os.environ.get("ISE_DC_COL_PROFILE", "endpoint_policy"),
-    "COL_GROUP": os.environ.get("ISE_DC_COL_GROUP", ""),
-    "COL_DEVICETYPE": os.environ.get("ISE_DC_COL_DEVICETYPE", ""),
-    "COL_IP": os.environ.get("ISE_DC_COL_IP", ""),
-    "COL_SITE": os.environ.get("ISE_DC_COL_SITE", ""),
+    "COL_GROUP": os.environ.get("ISE_DC_COL_GROUP", "identity_group_id"),
+    "COL_DEVICETYPE": os.environ.get("ISE_DC_COL_DEVICETYPE", ""),  # blank -> use profile
+    "COL_IP": os.environ.get("ISE_DC_COL_IP", "endpoint_ip"),
+    "COL_SITE": os.environ.get("ISE_DC_COL_SITE", ""),  # not in endpoints_data
+    # Location via SQL from RADIUS_AUTHENTICATIONS(CALLING_STATION_ID -> LOCATION),
+    # so we never walk NADs / call MnT. Set LOCATION empty to fall back to the
+    # endpoint IP + SITE_SUBNETS instead.
+    "LOCATION_VIEW": os.environ.get("ISE_DC_LOCATION_VIEW", "radius_authentications"),
+    "COL_LOC_MAC": os.environ.get("ISE_DC_COL_LOC_MAC", "calling_station_id"),
+    "COL_LOC_SITE": os.environ.get("ISE_DC_COL_LOC_SITE", "location"),
 }
 
 # ---------------------------------------------------------------------------

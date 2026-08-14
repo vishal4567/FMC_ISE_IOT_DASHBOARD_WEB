@@ -21,8 +21,10 @@ from django.core.management.base import BaseCommand
 class Command(BaseCommand):
     help = "Inspect the ISE Data Connect schema (dump endpoint columns + samples)."
 
-    # Views worth dumping by default (endpoints first — that's our discovery source).
+    # Documented Data Connect views most relevant to this app (endpoints first —
+    # that's our discovery source; radius carries per-MAC LOCATION for site).
     DEFAULT_VIEWS = ["endpoints_data", "radius_authentications",
+                     "endpoint_identity_groups", "network_devices",
                      "network_device_groups"]
 
     def add_arguments(self, parser):

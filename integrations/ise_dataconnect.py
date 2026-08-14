@@ -173,3 +173,25 @@ class DataConnectClient:
                 "site": r.get("site", "") or "",
             })
         return out
+
+    def location_by_mac(self, macs, *, view="radius_authentications",
+                        mac_col="calling_station_id", loc_col="location"):
+        """``{MAC: site}`` from the RADIUS view - one row per MAC (any non-null
+        location). Batches the MAC list (Oracle IN caps at 1000)."""
+        want = [m.upper() for m in macs if m]
+        out = {}
+        for i in range(0, len(want), 900):
+            chunk = want[i:i + 900]
+            binds = {f"m{j}": m for j, m in enumerate(chunk)}
+            inlist = ", ".join(f":{k}" for k in binds)
+            sql = (f"SELECT UPPER({mac_col}) AS mac, MAX({loc_col}) AS site "
+                   f"FROM {view} WHERE UPPER({mac_col}) IN ({inlist}) "
+                   f"AND {loc_col} IS NOT NULL GROUP BY UPPER({mac_col})")
+            try:
+                _, rows = self.query(sql, binds)
+            except DataConnectError:
+                continue
+            for r in rows:
+                if r.get("mac"):
+                    out[str(r["mac"]).upper()] = r.get("site", "") or ""
+        return out
