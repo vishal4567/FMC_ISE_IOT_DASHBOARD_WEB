@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import datetime as _dt
 import decimal as _dec
+import time as _time
+from contextlib import contextmanager
 
 SOURCE = "ISE-DataConnect"
 
@@ -55,6 +57,31 @@ class DataConnectClient:
         self.verify_tls = verify_tls
         self.ca_cert = ca_cert
         self.timeout = int(timeout)
+        self.log = None        # optional callable(msg) for per-query progress
+        self._conn = None      # reused connection inside a session()
+
+    def _say(self, msg):
+        if callable(self.log):
+            self.log(msg)
+
+    @contextmanager
+    def session(self):
+        """Reuse ONE connection for all queries inside the block (each connect is
+        a ~2s TLS handshake, so this matters for multi-query work)."""
+        t = _time.monotonic()
+        conn = self._connect()
+        self._say(f"[dc] connected {self.host}:{self.port}/{self.service_name} "
+                  f"({round(_time.monotonic()-t,2)}s)")
+        self._conn = conn
+        try:
+            yield self
+        finally:
+            self._conn = None
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._say("[dc] connection closed")
 
     # -- connection ---------------------------------------------------------
     def _params(self):
@@ -104,24 +131,33 @@ class DataConnectClient:
 
     # -- queries ------------------------------------------------------------
     def query(self, sql, params=None):
-        """Run a SELECT; return ``(columns, rows)`` where rows are dicts.
-        Column names are lower-cased."""
-        conn = self._connect()
+        """Run a SELECT; return ``(columns, rows)``. Logs the SQL + row count +
+        seconds via self.log. Reuses the session connection if one is open."""
+        own = self._conn is None
+        conn = self._conn or self._connect()
+        label = " ".join(sql.split())
+        self._say(f"[dc] SQL: {label[:110]}{' …' if len(label) > 110 else ''}"
+                  + (f"  ({len(params)} binds)" if params else ""))
+        t = _time.monotonic()
         try:
             cur = conn.cursor()
             cur.execute(sql, params or {})
             cols = [d[0].lower() for d in (cur.description or [])]
             rows = [{c: _clean(v) for c, v in zip(cols, rec)} for rec in cur]
+            self._say(f"[dc]   -> {len(rows)} rows in {round(_time.monotonic()-t,2)}s")
             return cols, rows
         except DataConnectError:
             raise
         except Exception as exc:
+            self._say(f"[dc]   -> ERROR in {round(_time.monotonic()-t,2)}s: "
+                      f"{str(exc)[:100]}")
             raise DataConnectError(f"Data Connect query failed: {exc}") from exc
         finally:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            if own:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def test(self):
         cols, rows = self.query("SELECT 1 AS ok FROM dual")
@@ -239,18 +275,21 @@ class DataConnectClient:
         location). Batches the MAC list (Oracle IN caps at 1000)."""
         want = [m.upper() for m in macs if m]
         out = {}
-        for i in range(0, len(want), 900):
-            chunk = want[i:i + 900]
-            binds = {f"m{j}": m for j, m in enumerate(chunk)}
-            inlist = ", ".join(f":{k}" for k in binds)
-            sql = (f"SELECT UPPER({mac_col}) AS mac, MAX({loc_col}) AS site "
-                   f"FROM {view} WHERE UPPER({mac_col}) IN ({inlist}) "
-                   f"AND {loc_col} IS NOT NULL GROUP BY UPPER({mac_col})")
-            try:
-                _, rows = self.query(sql, binds)
-            except DataConnectError:
-                continue
-            for r in rows:
-                if r.get("mac"):
-                    out[str(r["mac"]).upper()] = r.get("site", "") or ""
+        n_batches = (len(want) + 899) // 900
+        with self.session():   # reuse one connection across all batches
+            for bi, i in enumerate(range(0, len(want), 900), 1):
+                chunk = want[i:i + 900]
+                self._say(f"[dc] location batch {bi}/{n_batches} ({len(chunk)} MACs)")
+                binds = {f"m{j}": m for j, m in enumerate(chunk)}
+                inlist = ", ".join(f":{k}" for k in binds)
+                sql = (f"SELECT UPPER({mac_col}) AS mac, MAX({loc_col}) AS site "
+                       f"FROM {view} WHERE UPPER({mac_col}) IN ({inlist}) "
+                       f"AND {loc_col} IS NOT NULL GROUP BY UPPER({mac_col})")
+                try:
+                    _, rows = self.query(sql, binds)
+                except DataConnectError:
+                    continue
+                for r in rows:
+                    if r.get("mac"):
+                        out[str(r["mac"]).upper()] = r.get("site", "") or ""
         return out

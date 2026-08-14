@@ -172,6 +172,7 @@ def sync_iot_endpoints(log=None) -> dict:
             f"(view {dc_cfg['ENDPOINTS_VIEW']}, {len(names)} profiles)...")
         try:
             dc = services.get_dataconnect_client()
+            dc.log = say            # per-SQL progress in the sync log
             base_rows = dc.iot_endpoints(
                 names, view=dc_cfg["ENDPOINTS_VIEW"], col_mac=dc_cfg["COL_MAC"],
                 col_profile=dc_cfg["COL_PROFILE"], col_group=dc_cfg["COL_GROUP"],

@@ -64,6 +64,7 @@ class Command(BaseCommand):
 
         try:
             dc = services.get_dataconnect_client()
+            dc.log = lambda m: (self.stdout.write(m), self.stdout.flush())
         except Exception as exc:
             self.stdout.write(self.style.ERROR(f"Data Connect not configured: {exc}"))
             return
