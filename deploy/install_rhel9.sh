@@ -8,11 +8,10 @@ DB_NAME="${POSTGRES_DB:-iotdash}"
 DB_USER="${POSTGRES_USER:-iotdash}"
 DB_PASS="${POSTGRES_PASSWORD:-CHANGE_ME}"
 
-# PostgreSQL stream. This build pins Django 4.2 LTS, which supports PG12+, so the
-# RHEL 9 DEFAULT stream (13) is fine and is the one most internal mirrors carry.
-# Override with PG_STREAM=15/16 only if that stream is mirrored AND you also bump
-# Django to >=5 in requirements.txt.
-PG_STREAM="${PG_STREAM:-13}"
+# PostgreSQL stream. This build runs Django 5, which requires PG >= 14. RHEL 9.8
+# AppStream offers streams 15/16/18 — install 16 by default (override with
+# PG_STREAM=15 if 16 isn't mirrored on your Satellite).
+PG_STREAM="${PG_STREAM:-16}"
 echo "==> Enabling PostgreSQL ${PG_STREAM} module stream"
 sudo dnf -y module reset postgresql || true
 sudo dnf -y module enable "postgresql:${PG_STREAM}" || true
