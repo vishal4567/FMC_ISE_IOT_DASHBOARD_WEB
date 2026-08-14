@@ -27,6 +27,13 @@ class DataConnectError(Exception):
     pass
 
 
+def _loc_leaf(v):
+    """RADIUS/NDG location is a hierarchy path like
+    'All Locations#India#Mumbai#BLDG5' - return the leaf ('BLDG5')."""
+    v = str(v or "").strip()
+    return v.rsplit("#", 1)[-1].strip() if "#" in v else v
+
+
 def _clean(v):
     """Make an Oracle value JSON-serialisable."""
     if v is None or isinstance(v, (str, int, float, bool)):
@@ -265,7 +272,7 @@ class DataConnectClient:
                 "logical_profile": r.get("grp", "") or "",
                 "device_type": r.get("device_type", "") or r.get("profile", "") or "",
                 "ip": r.get("ip", "") or "",
-                "site": r.get("site", "") or "",
+                "site": _loc_leaf(r.get("site", "")),
             })
         return out
 
@@ -298,5 +305,5 @@ class DataConnectClient:
                     continue
                 for r in rows:
                     if r.get("mac"):
-                        out[str(r["mac"]).upper()] = r.get("site", "") or ""
+                        out[str(r["mac"]).upper()] = _loc_leaf(r.get("site", ""))
         return out
