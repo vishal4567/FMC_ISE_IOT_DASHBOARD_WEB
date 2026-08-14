@@ -134,13 +134,38 @@ class DataConnectClient:
         return []
 
     def columns(self, view):
-        """Column names of a view - works even when it has 0 rows."""
-        cols, _ = self.query(f"SELECT * FROM {view} FETCH FIRST 1 ROWS ONLY")
+        """Column names of a view. Uses WHERE 1=0 so NO rows are fetched - this
+        avoids DPY-3022 on views with a named-time-zone timestamp column."""
+        cols, _ = self.query(f"SELECT * FROM {view} WHERE 1=0")
         return cols
 
     def sample(self, view, n=5):
-        """All columns for the first ``n`` rows of a view."""
-        return self.query(f"SELECT * FROM {view} FETCH FIRST {int(n)} ROWS ONLY")
+        """First ``n`` rows, TO_CHAR'ing any TIMESTAMP columns so named-time-zone
+        values (unsupported in thin mode) come back as strings."""
+        import oracledb
+
+        conn = self._connect()
+        try:
+            cur = conn.cursor()
+            cur.execute(f"SELECT * FROM {view} WHERE 1=0")   # describe only
+            tz = (oracledb.DB_TYPE_TIMESTAMP, oracledb.DB_TYPE_TIMESTAMP_TZ,
+                  oracledb.DB_TYPE_TIMESTAMP_LTZ)
+            parts = []
+            for d in cur.description:
+                name, tcode = d[0], d[1]
+                parts.append(f"TO_CHAR({name}) AS {name}" if tcode in tz else name)
+            cur.execute(f"SELECT {', '.join(parts)} FROM {view} "
+                        f"FETCH FIRST {int(n)} ROWS ONLY")
+            cols = [c[0].lower() for c in cur.description]
+            rows = [{c: _clean(v) for c, v in zip(cols, rec)} for rec in cur]
+            return cols, rows
+        except Exception as exc:
+            raise DataConnectError(f"sample({view}) failed: {exc}") from exc
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def count(self, view):
         _, rows = self.query(f"SELECT COUNT(*) AS n FROM {view}")
