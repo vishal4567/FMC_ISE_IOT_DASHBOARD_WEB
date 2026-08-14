@@ -86,24 +86,58 @@ git log --oneline -1
 
 ---
 
-## 4. Install the stack + migrate (one script)
+## 4. Install the stack + migrate (one script — pick a PostgreSQL source)
 
-`deploy/install_rhel9.sh` installs Python 3.11 / PostgreSQL / Redis / nginx from
-**RHEL repos** (no internet registry needed), (re)creates the DB + role + venv,
+`deploy/install_rhel9.sh` installs Python 3.11 / Redis / nginx, installs
+**PostgreSQL 16**, (re)creates the DB + role, sets `md5` auth, creates the venv,
 runs migrate + collectstatic, sets SELinux + firewalld, and enables the
-`iotdash-web/worker/beat` services.
+`iotdash-web/worker/beat` services. Already-installed packages are a no-op, so
+running it now (with only Postgres missing) just fills in Postgres + the rest.
 
+**Django 5 needs PostgreSQL ≥ 14.** Choose where Postgres comes from:
+
+### Option A — RHEL AppStream module (default)
+Postgres from your Satellite's `postgresql:16` module stream. Use this when the
+`16` (or `15`) stream is **mirrored and reachable** on your Satellite.
 ```bash
 cd /opt/iotdash
 POSTGRES_PASSWORD='<same value as in .env.prod>' sudo -E bash deploy/install_rhel9.sh
+#   need a different stream?  add:  PG_STREAM=15
 ```
+Package `postgresql-server` · service `postgresql` · data `/var/lib/pgsql/data`.
+
+### Option B — PostgreSQL's own repo (PGDG, secondary repo)
+Adds `yum.postgresql.org` (like adding the MongoDB repo) and installs PG 16 from
+there — use this when the RHEL module isn't mirrored but the host **can reach the
+internet** (or a proxy) to `download.postgresql.org`.
+```bash
+cd /opt/iotdash
+POSTGRES_PASSWORD='<same value as in .env.prod>' PG_SOURCE=pgdg \
+  sudo -E bash deploy/install_rhel9.sh
+#   different major?  add:  PG_MAJOR=15
+```
+Package `postgresql16-server` · service `postgresql-16` · data
+`/var/lib/pgsql/16/data`. The script parameterizes all of these, so the DB/auth/
+migrate steps are identical to Option A.
+
+> **Option B note:** PGDG's `psql` isn't on `PATH`. Anywhere this guide runs a
+> bare `psql` manually (e.g. §2b drop, §10 rollback), use the full path:
+> `sudo -u postgres /usr/pgsql-16/bin/psql …`.
+
+> Both options still need **`python3.11`, `redis`, `nginx`** from the RHEL repos
+> (only Red Hat ships these). PGDG only removes the Satellite dependency for
+> **Postgres** — if those base packages aren't already installed and the
+> Satellite is down, install them first (you said they're already in).
+
 Because the DB was dropped in §2b, `migrate` builds **all** tables fresh (expect a
 full set of "Applying …" lines).
 
-Confirm the platform is up:
+Confirm the platform is up (use your Postgres service name):
 ```bash
-systemctl is-active postgresql redis nginx iotdash-web iotdash-worker iotdash-beat
+PGSVC=postgresql            # Option A;  Option B -> postgresql-16
+systemctl is-active $PGSVC redis nginx iotdash-web iotdash-worker iotdash-beat
 curl -sI http://localhost/ | head -1        # HTTP/1.1 200 or 302
+sudo -u postgres $( [ "$PGSVC" = postgresql ] && echo psql || echo /usr/pgsql-16/bin/psql ) -c "SHOW server_version;"
 ```
 
 ---
@@ -167,7 +201,8 @@ Full detail: [ESTREAMER_SETUP.md](ESTREAMER_SETUP.md).
 - [ ] Reports cards show counts; opening a report **lazy-loads** its table
 - [ ] `$RUN shell -c "from dashboard.models import Snapshot; print(Snapshot.objects.count())"` > 0
 - [ ] eStreamer logs show events; W2/W4/W5 populate over time
-- [ ] `systemctl is-active postgresql redis nginx iotdash-web iotdash-worker iotdash-beat` all `active`
+- [ ] `systemctl is-active $PGSVC redis nginx iotdash-web iotdash-worker iotdash-beat` all `active`
+      (`$PGSVC` = `postgresql` for Option A, `postgresql-16` for Option B)
 - [ ] Beat schedules: daily `refresh_ise_reference`, hourly `sync_iot_endpoints`,
       15-min `snapshot_datasets`, rollup, purge — no `poll_ise_inventory` (retired)
 

@@ -8,24 +8,45 @@ DB_NAME="${POSTGRES_DB:-iotdash}"
 DB_USER="${POSTGRES_USER:-iotdash}"
 DB_PASS="${POSTGRES_PASSWORD:-CHANGE_ME}"
 
-# PostgreSQL stream. This build runs Django 5, which requires PG >= 14. RHEL 9.8
-# AppStream offers streams 15/16/18 — install 16 by default (override with
-# PG_STREAM=15 if 16 isn't mirrored on your Satellite).
+# ---------------------------------------------------------------------------
+# PostgreSQL source (Django 5 needs PG >= 14):
+#   PG_SOURCE=module (default) - RHEL AppStream module stream. Needs the stream
+#                                mirrored on your Satellite (PG_STREAM, default 16).
+#   PG_SOURCE=pgdg             - PostgreSQL's own repo (yum.postgresql.org). Needs
+#                                internet to that host (PG_MAJOR, default 16).
+# ---------------------------------------------------------------------------
+PG_SOURCE="${PG_SOURCE:-module}"
 PG_STREAM="${PG_STREAM:-16}"
-echo "==> Enabling PostgreSQL ${PG_STREAM} module stream"
-sudo dnf -y module reset postgresql || true
-sudo dnf -y module enable "postgresql:${PG_STREAM}" || true
+PG_MAJOR="${PG_MAJOR:-16}"
 
-echo "==> Installing packages (dnf)"
-sudo dnf -y install python3.11 python3.11-pip \
-    postgresql-server postgresql-contrib redis nginx \
+echo "==> Installing base packages (dnf)"
+sudo dnf -y install python3.11 python3.11-pip redis nginx \
     policycoreutils-python-utils gcc
 
-echo "==> PostgreSQL init + services"
-if [ ! -s /var/lib/pgsql/data/PG_VERSION ]; then
-  sudo postgresql-setup --initdb
+if [ "${PG_SOURCE}" = "pgdg" ]; then
+  echo "==> PostgreSQL ${PG_MAJOR} from PGDG (yum.postgresql.org)"
+  sudo dnf -y install \
+    "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+  sudo dnf -qy module disable postgresql || true
+  sudo dnf -y install "postgresql${PG_MAJOR}-server" "postgresql${PG_MAJOR}-contrib"
+  PGSVC="postgresql-${PG_MAJOR}"
+  PGDATA="/var/lib/pgsql/${PG_MAJOR}/data"
+  PSQL="/usr/pgsql-${PG_MAJOR}/bin/psql"
+  [ -s "${PGDATA}/PG_VERSION" ] || \
+    sudo "/usr/pgsql-${PG_MAJOR}/bin/postgresql-${PG_MAJOR}-setup" initdb
+else
+  echo "==> PostgreSQL ${PG_STREAM} from the RHEL AppStream module"
+  sudo dnf -y module reset postgresql || true
+  sudo dnf -y module enable "postgresql:${PG_STREAM}" || true
+  sudo dnf -y install postgresql-server postgresql-contrib
+  PGSVC="postgresql"
+  PGDATA="/var/lib/pgsql/data"
+  PSQL="psql"
+  [ -s "${PGDATA}/PG_VERSION" ] || sudo postgresql-setup --initdb
 fi
-sudo systemctl enable --now postgresql redis nginx
+
+echo "==> Enable + start services (${PGSVC}, redis, nginx)"
+sudo systemctl enable --now "${PGSVC}" redis nginx
 
 echo "==> Create database + user"
 # Run psql from a dir the postgres user can enter, else it warns
@@ -33,22 +54,23 @@ echo "==> Create database + user"
 cd /tmp
 # Create the role if missing; always (re)set its password to match .env.prod so
 # a leftover role from a previous build can't cause a password mismatch.
-if sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
-  sudo -u postgres psql -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+if sudo -u postgres ${PSQL} -tAc "SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}'" | grep -q 1; then
+  sudo -u postgres ${PSQL} -c "ALTER USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
 else
-  sudo -u postgres psql -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
+  sudo -u postgres ${PSQL} -c "CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASS}';"
 fi
-sudo -u postgres psql -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
-  sudo -u postgres psql -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
+sudo -u postgres ${PSQL} -tc "SELECT 1 FROM pg_database WHERE datname='${DB_NAME}'" | grep -q 1 || \
+  sudo -u postgres ${PSQL} -c "CREATE DATABASE ${DB_NAME} OWNER ${DB_USER};"
 
 echo "==> Enable password auth for local TCP (pg_hba.conf)"
 # RHEL's default pg_hba.conf uses 'ident' for 127.0.0.1/::1, which rejects
 # Django's password login ("Ident authentication failed"). Switch the local TCP
 # rules to md5 (md5 also transparently accepts scram-stored passwords on PG10+).
-HBA="$(sudo -u postgres psql -tAc 'SHOW hba_file;')"
+# SHOW hba_file makes this work for either install path (module or PGDG data dir).
+HBA="$(sudo -u postgres ${PSQL} -tAc 'SHOW hba_file;')"
 sudo cp "${HBA}" "${HBA}.bak.$(date +%s)"
 sudo sed -ri 's#^(host[[:space:]]+all[[:space:]]+all[[:space:]]+(127\.0\.0\.1/32|::1/128)[[:space:]]+)(ident|peer|scram-sha-256)#\1md5#' "${HBA}"
-sudo systemctl reload postgresql
+sudo systemctl reload "${PGSVC}"
 
 echo "==> App user + virtualenv"
 id iotdash &>/dev/null || sudo useradd -r -m -d "${APP_DIR}" iotdash
