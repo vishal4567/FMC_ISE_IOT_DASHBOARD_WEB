@@ -66,6 +66,13 @@ def refresh_ise_reference(log=None) -> dict:
     from dashboard import services
 
     say = _logger(log)
+    # Data Connect mode needs no ERS reference data (it filters by profile names
+    # and reads location from the RADIUS view), so skip the profiler catalogue +
+    # NAD walk entirely.
+    if settings.DATACONNECT["USE_FOR_DISCOVERY"]:
+        say("[reference] Data Connect mode - no ERS profile/NAD reference needed")
+        return {"dataconnect": True}
+
     try:
         ise = services.get_ise_client()
     except Exception as exc:
@@ -119,21 +126,35 @@ def sync_iot_endpoints(log=None) -> dict:
 
     say = _logger(log)
     cfg = settings.ISE
+    dc_mode = settings.DATACONNECT["USE_FOR_DISCOVERY"]
+
+    # The ERS client is only needed by the API discovery paths. In Data Connect
+    # mode it's optional (and ISE ERS creds may not even be configured).
+    ise = None
     try:
         ise = services.get_ise_client()
     except Exception as exc:
-        return {"error": str(exc)}
+        if not dc_mode:
+            return {"error": str(exc)}
+        say(f"[sync] ERS client unavailable ({exc}) - fine, Data Connect mode")
 
-    # Reference data (fall back to computing inline if the daily run hasn't fired).
-    profile_map = cache.get(_CK_PROFILE_MAP)
-    if profile_map is None:
-        say("[sync] reference cache empty - resolving IoT profiles now "
-            "(reads the profiler catalogue, ~30-60s)...")
-        profile_map = ise.resolve_profile_ids(cfg["IOT_PROFILES"])
-        cache.set(_CK_PROFILE_MAP, profile_map, _REFERENCE_TTL)
-    nad_map = cache.get(_CK_NAD_LOCATION) or {}
-    say(f"[sync] {len(profile_map)} IoT profiles; location={cfg['LOCATION_METHOD']}; "
-        f"NAD map={len(nad_map)} entries; workers={cfg['SYNC_WORKERS']}")
+    # Reference data. Data Connect filters by profile NAMES directly, so it needs
+    # NO ERS profileId resolution and NO NAD walk.
+    if dc_mode:
+        profile_map = {}
+        nad_map = {}
+        say(f"[sync] Data Connect discovery; {len(cfg['IOT_PROFILES'])} IoT "
+            f"profiles; workers={cfg['SYNC_WORKERS']}")
+    else:
+        profile_map = cache.get(_CK_PROFILE_MAP)
+        if profile_map is None:
+            say("[sync] reference cache empty - resolving IoT profiles now "
+                "(reads the profiler catalogue, ~30-60s)...")
+            profile_map = ise.resolve_profile_ids(cfg["IOT_PROFILES"])
+            cache.set(_CK_PROFILE_MAP, profile_map, _REFERENCE_TTL)
+        nad_map = cache.get(_CK_NAD_LOCATION) or {}
+        say(f"[sync] {len(profile_map)} IoT profiles; location={cfg['LOCATION_METHOD']}; "
+            f"NAD map={len(nad_map)} entries; workers={cfg['SYNC_WORKERS']}")
 
     subnets = _parse_site_subnets(cfg["SITE_SUBNETS"])
     method = cfg["LOCATION_METHOD"]
