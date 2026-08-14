@@ -129,6 +129,19 @@ migrate steps are identical to Option A.
 > **Postgres** — if those base packages aren't already installed and the
 > Satellite is down, install them first (you said they're already in).
 
+**Already installed some of this by hand?** The script is idempotent: it checks
+`rpm -q` and **skips any package that's already present** (never calling `dnf` for
+it — so a flaky repo can't break the run), skips `initdb` if the data dir exists,
+and skips the `pip` install if the venv already has the deps (`FORCE_PIP=1` to
+force). So if you already installed PostgreSQL (e.g. PGDG by hand) and the base
+packages, just run the matching option — it will **skip straight to creating the
+DB, setting auth, migrating, and enabling services**:
+```bash
+# you installed PG16 via PGDG manually -> run the pgdg option; it detects PG and proceeds
+cd /opt/iotdash
+POSTGRES_PASSWORD='<same as .env.prod>' PG_SOURCE=pgdg sudo -E bash deploy/install_rhel9.sh
+```
+
 Because the DB was dropped in §2b, `migrate` builds **all** tables fresh (expect a
 full set of "Applying …" lines).
 

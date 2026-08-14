@@ -8,6 +8,20 @@ DB_NAME="${POSTGRES_DB:-iotdash}"
 DB_USER="${POSTGRES_USER:-iotdash}"
 DB_PASS="${POSTGRES_PASSWORD:-CHANGE_ME}"
 
+# Install only packages that are MISSING. If everything is already present we
+# skip `dnf` entirely — important when the repo/Satellite is flaky, because even
+# a no-op `dnf install` refreshes metadata from the (possibly down) mirror.
+ensure_pkgs() {
+  local p missing=()
+  for p in "$@"; do rpm -q "$p" &>/dev/null || missing+=("$p"); done
+  if [ "${#missing[@]}" -eq 0 ]; then
+    echo "   already installed: $*"
+  else
+    echo "   installing: ${missing[*]}"
+    sudo dnf -y install "${missing[@]}"
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # PostgreSQL source (Django 5 needs PG >= 14):
 #   PG_SOURCE=module (default) - RHEL AppStream module stream. Needs the stream
@@ -19,29 +33,36 @@ PG_SOURCE="${PG_SOURCE:-module}"
 PG_STREAM="${PG_STREAM:-16}"
 PG_MAJOR="${PG_MAJOR:-16}"
 
-echo "==> Installing base packages (dnf)"
-sudo dnf -y install python3.11 python3.11-pip redis nginx \
-    policycoreutils-python-utils gcc
+echo "==> Base packages (python3.11 / redis / nginx)"
+ensure_pkgs python3.11 python3.11-pip redis nginx policycoreutils-python-utils gcc
 
 if [ "${PG_SOURCE}" = "pgdg" ]; then
   echo "==> PostgreSQL ${PG_MAJOR} from PGDG (yum.postgresql.org)"
-  sudo dnf -y install \
-    "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
-  sudo dnf -qy module disable postgresql || true
-  sudo dnf -y install "postgresql${PG_MAJOR}-server" "postgresql${PG_MAJOR}-contrib"
   PGSVC="postgresql-${PG_MAJOR}"
   PGDATA="/var/lib/pgsql/${PG_MAJOR}/data"
   PSQL="/usr/pgsql-${PG_MAJOR}/bin/psql"
+  if rpm -q "postgresql${PG_MAJOR}-server" &>/dev/null; then
+    echo "   postgresql${PG_MAJOR}-server already installed — skipping install"
+  else
+    rpm -q pgdg-redhat-repo &>/dev/null || sudo dnf -y install \
+      "https://download.postgresql.org/pub/repos/yum/reporpms/EL-9-x86_64/pgdg-redhat-repo-latest.noarch.rpm"
+    sudo dnf -qy module disable postgresql || true
+    ensure_pkgs "postgresql${PG_MAJOR}-server" "postgresql${PG_MAJOR}-contrib"
+  fi
   [ -s "${PGDATA}/PG_VERSION" ] || \
     sudo "/usr/pgsql-${PG_MAJOR}/bin/postgresql-${PG_MAJOR}-setup" initdb
 else
   echo "==> PostgreSQL ${PG_STREAM} from the RHEL AppStream module"
-  sudo dnf -y module reset postgresql || true
-  sudo dnf -y module enable "postgresql:${PG_STREAM}" || true
-  sudo dnf -y install postgresql-server postgresql-contrib
   PGSVC="postgresql"
   PGDATA="/var/lib/pgsql/data"
   PSQL="psql"
+  if rpm -q postgresql-server &>/dev/null; then
+    echo "   postgresql-server already installed — skipping install"
+  else
+    sudo dnf -y module reset postgresql || true
+    sudo dnf -y module enable "postgresql:${PG_STREAM}" || true
+    ensure_pkgs postgresql-server postgresql-contrib
+  fi
   [ -s "${PGDATA}/PG_VERSION" ] || sudo postgresql-setup --initdb
 fi
 
@@ -75,9 +96,16 @@ sudo systemctl reload "${PGSVC}"
 echo "==> App user + virtualenv"
 id iotdash &>/dev/null || sudo useradd -r -m -d "${APP_DIR}" iotdash
 sudo chown -R iotdash:iotdash "${APP_DIR}"
-sudo -u iotdash python3.11 -m venv "${APP_DIR}/.venv"
-sudo -u iotdash "${APP_DIR}/.venv/bin/pip" install --upgrade pip
-sudo -u iotdash "${APP_DIR}/.venv/bin/pip" install -r "${APP_DIR}/requirements-prod.txt"
+[ -x "${APP_DIR}/.venv/bin/python" ] || sudo -u iotdash python3.11 -m venv "${APP_DIR}/.venv"
+# Skip the PyPI install if the venv already satisfies the deps (offline-safe);
+# force a refresh with FORCE_PIP=1.
+if [ "${FORCE_PIP:-0}" != "1" ] && sudo -u iotdash "${APP_DIR}/.venv/bin/python" \
+     -c "import django,psycopg,celery,redis,whitenoise,gunicorn,dotenv,requests" &>/dev/null; then
+  echo "   python deps already satisfied — skipping pip install (FORCE_PIP=1 to refresh)"
+else
+  sudo -u iotdash "${APP_DIR}/.venv/bin/pip" install --upgrade pip
+  sudo -u iotdash "${APP_DIR}/.venv/bin/pip" install -r "${APP_DIR}/requirements-prod.txt"
+fi
 
 echo "==> Migrate + collectstatic"
 cd "${APP_DIR}"
