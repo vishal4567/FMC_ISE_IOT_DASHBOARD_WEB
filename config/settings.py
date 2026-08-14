@@ -237,6 +237,12 @@ ISE = {
     # the device type).
     "USE_OPENAPI": _env_bool("ISE_USE_OPENAPI", False),
     "OPENAPI_PAGE_SIZE": _env_int("ISE_OPENAPI_PAGE_SIZE", 500),
+    # Open-API-path only: instead of a slow per-profile filter (ISE re-scans all
+    # endpoints for each profileId), page through ALL endpoints once (cheap
+    # unfiltered sequential paging) and keep those whose inline profileId is in
+    # the allow-list. Better when the ISE profileId filter is slow. With this on,
+    # use a LARGE page size and enough MAX_PAGES to cover the full endpoint count.
+    "OPENAPI_SCAN_ALL": _env_bool("ISE_OPENAPI_SCAN_ALL", False),
     # Open-API-path only: backfill the (blank) device type from ERS
     # mfcAttributes. Ignored by the ERS path, which always reads mfcAttributes.
     "ERS_ENRICH": _env_bool("ISE_ERS_ENRICH", True),

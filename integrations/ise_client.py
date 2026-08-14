@@ -393,13 +393,19 @@ class ISEClient:
         """Full Open API endpoint object for one MAC (untruncated)."""
         return self._openapi_get(f"/endpoint/{mac.strip().upper()}")
 
-    def openapi_iot_endpoints(self, profile_ids, log=None):
-        """``{MAC: endpoint_obj}`` for the given profileIds via the Open API
-        filter. Falls back to one full paged scan (client-side filter) if this
-        ISE rejects the profileId filter. ``log`` gets a line per API call."""
+    def openapi_iot_endpoints(self, profile_ids, scan_all=False, log=None):
+        """``{MAC: endpoint_obj}`` for the given profileIds. Two strategies:
+        - default: one Open API ``profileId`` filter per profile (ISE re-scans
+          all endpoints each time - slow if the filter is inefficient).
+        - scan_all=True: page through ALL endpoints once and keep those whose
+          inline profileId is in the set (unfiltered paging is cheap).
+        Falls back to scan_all automatically if the ISE rejects the filter (400).
+        ``log`` gets a line per API call."""
         ids = [p for p in profile_ids if p]
         if not ids:
             return {}
+        if scan_all:
+            return self._openapi_full_scan(set(ids), log=log)
         try:
             return self._openapi_by_filter(ids, log=log)
         except IntegrationError as exc:
@@ -430,6 +436,9 @@ class ISEClient:
             if len(batch) < size:
                 break
             page += 1
+        else:
+            say(f"      (reached ISE_MAX_PAGES={self.max_pages} cap at size {size} "
+                f"= {size * self.max_pages} rows; raise ISE_MAX_PAGES if more remain)")
 
     def _openapi_by_filter(self, ids, log=None):
         say = log if callable(log) else (lambda *a, **k: None)
@@ -445,14 +454,18 @@ class ISEClient:
 
     def _openapi_full_scan(self, id_set, log=None):
         say = log if callable(log) else (lambda *a, **k: None)
-        say("    Open API filter unsupported - scanning ALL endpoints "
-            "(client-side filter, slow)...")
-        out = {}
+        cap = self.openapi_page_size * self.max_pages
+        say(f"    SCAN-ALL: paging every endpoint (unfiltered), keeping profileId "
+            f"in {len(id_set)} IoT profiles. size={self.openapi_page_size}, "
+            f"cap={cap} endpoints (page_size x ISE_MAX_PAGES).")
+        out, scanned = {}, 0
         for obj in self._openapi_page({}, log=log):
+            scanned += 1
             if obj.get("profileId") in id_set:
                 mac = (obj.get("mac") or obj.get("name") or "").upper()
                 if mac:
                     out[mac] = obj
+        say(f"    SCAN-ALL done: scanned {scanned} endpoints, matched {len(out)} IoT")
         return out
 
     def map_openapi_endpoint(self, obj, profile_name_by_id=None):

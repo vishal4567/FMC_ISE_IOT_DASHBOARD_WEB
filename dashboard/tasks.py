@@ -143,10 +143,12 @@ def sync_iot_endpoints(log=None) -> dict:
     # 1. Discover IoT endpoints. Open API (primary): deviceType/vendor/ipAddress
     #    inline. ERS (fallback): light refs then per-endpoint detail.
     if cfg["USE_OPENAPI"]:
-        say(f"[sync] discovering IoT endpoints via Open API profileId filter "
+        mode = "scan-all + client filter" if cfg["OPENAPI_SCAN_ALL"] else "profileId filter"
+        say(f"[sync] discovering IoT endpoints via Open API {mode} "
             f"(page size {cfg['OPENAPI_PAGE_SIZE']}, timeout {cfg['TIMEOUT']}s)...")
         try:
-            objs = ise.openapi_iot_endpoints(profile_ids, log=say)
+            objs = ise.openapi_iot_endpoints(
+                profile_ids, scan_all=cfg["OPENAPI_SCAN_ALL"], log=say)
         except Exception as exc:
             return {"error": f"Open API endpoint fetch failed: {exc}"}
         base_rows = [ise.map_openapi_endpoint(o, profile_map) for o in objs.values()]
