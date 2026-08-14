@@ -38,6 +38,9 @@ class Command(BaseCommand):
         parser.add_argument("--one", default="",
                             help="fetch ONE full row of a view and print it as "
                                  "column: value (real data, not just column names)")
+        parser.add_argument("--mac", default="",
+                            help="look up ONE MAC across the endpoint + session "
+                                 "views and print every column: value")
 
     def handle(self, *args, **opts):
         from dashboard import services
@@ -74,6 +77,27 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.MIGRATE_HEADING("=== ISE Data Connect ==="))
         write("_test", run("connect (SELECT 1 FROM dual)", dc.test))
+
+        if opts["mac"]:
+            mac = opts["mac"].strip().upper()
+            targets = [
+                ("endpoints_data", "mac_address"),
+                ("radius_authentication_summary", "calling_station_id"),
+                ("radius_authentications", "calling_station_id"),
+            ]
+            for view, col in targets:
+                def q(v=view, c=col):
+                    return _qr(dc, f"SELECT * FROM {v} WHERE UPPER({c}) = :m "
+                                   f"FETCH FIRST 1 ROWS ONLY", {"m": mac})
+                res = run(f"{view} for {mac}", q)
+                write(f"{view}.mac", res)
+                if isinstance(res, dict) and res.get("rows"):
+                    row = res["rows"][0]
+                    for k in res["columns"]:
+                        self.stdout.write(f"      {k:28} = {row.get(k)!r}")
+                elif isinstance(res, dict) and "error" not in res:
+                    self.stdout.write("      (no row)")
+            return
 
         if opts["one"]:
             view = opts["one"]
@@ -120,6 +144,6 @@ class Command(BaseCommand):
             f"dataconnect.endpoints_data.json so I can map device type / site / IP."))
 
 
-def _qr(dc, sql):
-    cols, rows = dc.query(sql)
+def _qr(dc, sql, params=None):
+    cols, rows = dc.query(sql, params)
     return {"columns": cols, "rows": rows}
