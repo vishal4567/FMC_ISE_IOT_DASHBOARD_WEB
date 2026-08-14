@@ -35,6 +35,9 @@ class Command(BaseCommand):
                             help="extra view(s) to dump (repeatable)")
         parser.add_argument("--sql", default="",
                             help="run an ad-hoc SELECT and print the result")
+        parser.add_argument("--one", default="",
+                            help="fetch ONE full row of a view and print it as "
+                                 "column: value (real data, not just column names)")
 
     def handle(self, *args, **opts):
         from dashboard import services
@@ -71,6 +74,19 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.MIGRATE_HEADING("=== ISE Data Connect ==="))
         write("_test", run("connect (SELECT 1 FROM dual)", dc.test))
+
+        if opts["one"]:
+            view = opts["one"]
+            res = run(f"one row of {view}", lambda: dc.sample(view, 1))
+            write(f"{view}.one", res)
+            if isinstance(res, tuple):
+                cols, rows = res
+                row = rows[0] if rows else {}
+                self.stdout.write(f"    {view}: {len(cols)} columns, "
+                                  f"{'1 row' if row else 'NO rows'}")
+                for c in cols:
+                    self.stdout.write(f"      {c:28} = {row.get(c)!r}")
+            return
 
         if opts["sql"]:
             res = run("ad-hoc sql", lambda: _qr(dc, opts["sql"]))
