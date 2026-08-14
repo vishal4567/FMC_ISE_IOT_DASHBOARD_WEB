@@ -49,9 +49,16 @@ class Command(BaseCommand):
         parser.add_argument("--all", action="store_true",
                             help="also run the full ERS catalogue, MnT, FMC and "
                                  "eStreamer probes (default: only Open API + location)")
+        parser.add_argument("--size", type=int, default=10,
+                            help="max records to request per list probe (default 10) "
+                                 "— keep small to return fast and avoid timeouts")
+        parser.add_argument("--timeout", type=int, default=0,
+                            help="override the ISE/FMC per-request timeout (seconds); "
+                                 "0 = use the configured default")
 
     def handle(self, *args, **opts):
         self._out_dir = opts["out_dir"]
+        self._size = max(1, int(opts.get("size") or 10))
         os.makedirs(self._out_dir, exist_ok=True)
         self._opts = opts
         self._t0 = time.perf_counter()
@@ -145,6 +152,9 @@ class Command(BaseCommand):
         from dashboard import services
         try:
             self._ise = services.get_ise_client()
+            if self._opts.get("timeout"):
+                self._ise.timeout = int(self._opts["timeout"])
+                self.stdout.write(f"  (ISE per-request timeout set to {self._ise.timeout}s)")
         except Exception as exc:
             self.stdout.write(self.style.ERROR(f"  ISE client init failed: {exc}"))
             self._write("ise.client", {"ok": False, "error": str(exc)})
@@ -256,9 +266,9 @@ class Command(BaseCommand):
         # serialNumber, custom/mdm attributes). An endpoint that is currently
         # connected/active shows a non-null "connectedLinks".
         self._run("ise.openapi.endpoints",
-                  lambda: self._openapi(ise, "/endpoint", {"size": 20, "page": 1}))
+                  lambda: self._openapi(ise, "/endpoint", {"size": self._size, "page": 1}))
         self._run("ise.openapi.endpoint_group",
-                  lambda: self._openapi(ise, "/endpoint-group", {"size": 5, "page": 1}))
+                  lambda: self._openapi(ise, "/endpoint-group", {"size": self._size, "page": 1}))
         # IoT scoping: confirm we can fetch ONLY endpoints in an allow-listed
         # profile / logical profile (the whole point of the hourly sync).
         self._run("ise.iot.profile_filter", lambda: self._iot_filter(ise))
@@ -272,18 +282,27 @@ class Command(BaseCommand):
         Returns counts so we know which method to use for the sync."""
         from django.conf import settings
         cfg = settings.ISE
-        out = {"tried": {}, "counts": {}}
+        size = self._size
+        out = {"tried": {}, "counts": {}, "size": size}
 
-        # a) resolve one profile name -> id
-        names = cfg.get("IOT_PROFILES") or []
-        prof_map = ise.resolve_profile_ids(names[:5]) if names else {}
-        pid = next(iter(prof_map), "")
-        out["resolved_profile"] = {pid: prof_map.get(pid, "")} if pid else {}
+        # a) resolve ONE profile name -> id with a single filtered call (avoids
+        #    fetching the whole ~900-entry profiler catalogue, which can time out).
+        name = (cfg.get("IOT_PROFILES") or [""])[0]
+        pid = ""
+        if name:
+            try:
+                r = ise._ers_get("/profilerprofile", {"filter": f"name.EQ.{name}", "size": 1})
+                res = (r.get("SearchResult", {}) or {}).get("resources", [])
+                pid = res[0]["id"] if res else ""
+                out["resolved_profile"] = {name: pid}
+                out["tried"]["resolve_profile_id"] = "ok" if pid else "name not found"
+            except Exception as exc:
+                out["tried"]["resolve_profile_id"] = str(exc)[:120]
 
         # b) ERS by profileId
         if pid:
             try:
-                res = ise._ers_get("/endpoint", {"filter": f"profileId.EQ.{pid}", "size": 5})
+                res = ise._ers_get("/endpoint", {"filter": f"profileId.EQ.{pid}", "size": size})
                 out["counts"]["ers_by_profileId"] = (
                     (res.get("SearchResult", {}) or {}).get("total"))
                 out["tried"]["ers_by_profileId"] = "ok"
@@ -294,7 +313,7 @@ class Command(BaseCommand):
         lp = (cfg.get("IOT_LOGICAL_PROFILES") or [""])[0]
         if lp:
             try:
-                res = ise._ers_get("/endpoint", {"filter": f"logicalProfileName.EQ.{lp}", "size": 5})
+                res = ise._ers_get("/endpoint", {"filter": f"logicalProfileName.EQ.{lp}", "size": size})
                 out["counts"]["ers_by_logicalProfile"] = (
                     (res.get("SearchResult", {}) or {}).get("total"))
                 out["tried"][f"ers_by_logicalProfile:{lp}"] = "ok"
@@ -305,7 +324,7 @@ class Command(BaseCommand):
         #    can see whether deviceType / vendor / ipAddress populate (=> no ERS).
         if pid:
             try:
-                raw = ise._openapi_get("/endpoint", {"filter": f"profileId.EQ.{pid}", "size": 5})
+                raw = ise._openapi_get("/endpoint", {"filter": f"profileId.EQ.{pid}", "size": size})
                 items = ise._openapi_items(raw)
                 out["tried"]["openapi_by_profileId"] = "ok"
                 out["counts"]["openapi_by_profileId"] = len(items)
