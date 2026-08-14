@@ -29,6 +29,8 @@ def _clean(v):
     """Make an Oracle value JSON-serialisable."""
     if v is None or isinstance(v, (str, int, float, bool)):
         return v
+    if isinstance(v, bytes):     # bypass_decode gives raw bytes -> lenient decode
+        return v.decode("utf-8", "replace")
     if isinstance(v, _dec.Decimal):
         return int(v) if v == v.to_integral_value() else float(v)
     if isinstance(v, (_dt.datetime, _dt.date)):
@@ -75,20 +77,27 @@ class DataConnectClient:
         )
 
     @staticmethod
-    def _tz_string_handler(cursor, metadata):
-        """Fetch TIMESTAMP WITH [LOCAL] TIME ZONE columns as strings. ISE stores
-        some with NAMED zones, which python-oracledb thin mode can't parse
-        (DPY-3022); returning them as VARCHAR sidesteps it."""
+    def _out_handler(cursor, metadata):
+        """Make fetches robust against ISE data quirks in thin mode:
+        - TIMESTAMP WITH [LOCAL] TIME ZONE with NAMED zones -> fetch as VARCHAR
+          (else DPY-3022 'named time zones are not supported').
+        - text columns -> bypass_decode so bad/non-UTF-8 bytes come back raw and
+          _clean() decodes them leniently (else UnicodeDecodeError on garbled data).
+        """
         import oracledb
-        if metadata.type_code in (oracledb.DB_TYPE_TIMESTAMP_TZ,
-                                  oracledb.DB_TYPE_TIMESTAMP_LTZ):
+        t = metadata.type_code
+        if t in (oracledb.DB_TYPE_TIMESTAMP_TZ, oracledb.DB_TYPE_TIMESTAMP_LTZ):
             return cursor.var(oracledb.DB_TYPE_VARCHAR, arraysize=cursor.arraysize)
+        if t in (oracledb.DB_TYPE_VARCHAR, oracledb.DB_TYPE_CHAR,
+                 oracledb.DB_TYPE_NVARCHAR, oracledb.DB_TYPE_NCHAR,
+                 oracledb.DB_TYPE_LONG):
+            return cursor.var(t, arraysize=cursor.arraysize, bypass_decode=True)
 
     def _connect(self):
         import oracledb
         try:
             conn = oracledb.connect(params=self._params())
-            conn.outputtypehandler = self._tz_string_handler
+            conn.outputtypehandler = self._out_handler
             return conn
         except Exception as exc:  # oracledb.Error or ssl/socket errors
             raise DataConnectError(f"Data Connect connect failed: {exc}") from exc

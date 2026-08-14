@@ -85,8 +85,11 @@ class Command(BaseCommand):
         rows = opts["rows"]
         for view in self.DEFAULT_VIEWS + opts["view"]:
             def dump(v=view):
-                cols = dc.columns(v)
-                _, sample = dc.sample(v, rows)
+                cols = dc.columns(v)   # column names always (WHERE 1=0, no fetch)
+                try:
+                    _, sample = dc.sample(v, rows)
+                except Exception as exc:
+                    sample = {"sample_error": str(exc)[:160]}
                 return {"view": v, "columns": cols, "column_count": len(cols),
                         "sample_rows": sample}
             data = run(f"dump {view}", dump)
