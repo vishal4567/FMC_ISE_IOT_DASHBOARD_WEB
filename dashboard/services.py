@@ -143,23 +143,63 @@ def _ise_endpoints():
     return rows
 
 
+def _dc_on() -> bool:
+    """True when ISE Data Connect is configured - route ISE reads through SQL."""
+    return bool(settings.DATACONNECT.get("ENABLED"))
+
+
 def _ise_endpoint_groups():
+    # ENDPOINT_IDENTITY_GROUPS(id, name, description, status)
+    if _dc_on():
+        return get_dataconnect_client().rows(
+            "endpoint_identity_groups", ["id", "name", "description", "status"],
+            order="name")
     return get_ise_client().get_endpoint_groups()
 
 
 def _ise_network_devices():
+    # NETWORK_DEVICES(id, name, ip_mask, profile_name, location, type)
+    if _dc_on():
+        return get_dataconnect_client().rows(
+            "network_devices",
+            ["name", "ip_mask", "type", "location", "profile_name"], order="name")
     return get_ise_client().get_network_devices()
 
 
 def _ise_profiles():
+    # Profiles actually in use (+ counts) from ENDPOINTS_DATA.
+    if _dc_on():
+        _, rows = get_dataconnect_client().query(
+            "SELECT endpoint_policy AS name, COUNT(*) AS count FROM endpoints_data "
+            "WHERE endpoint_policy IS NOT NULL GROUP BY endpoint_policy "
+            "ORDER BY COUNT(*) DESC")
+        return rows
     return get_ise_client().get_profiler_profiles()
 
 
 def _ise_sessions():
+    # Recent RADIUS auth sessions (endpoint identity + NAS + location + IP).
+    if _dc_on():
+        return get_dataconnect_client().rows(
+            "radius_authentications",
+            ["calling_station_id", "username", "endpoint_profile", "device_type",
+             "location", "nas_ip_address", "framed_ip_address", "identity_group",
+             "passed", "failed"],
+            order="timestamp DESC", limit=500)
     return get_ise_client().get_active_sessions()
 
 
 def _ise_unauthorized():
+    # Endpoints in a Blocked/Unknown/Blacklist identity group (join ENDPOINTS_DATA
+    # -> ENDPOINT_IDENTITY_GROUPS by group id).
+    if _dc_on():
+        _, rows = get_dataconnect_client().query(
+            "SELECT e.mac_address AS mac, g.name AS unauthorized_group "
+            "FROM endpoints_data e JOIN endpoint_identity_groups g "
+            "ON e.identity_group_id = g.id "
+            "WHERE UPPER(g.name) IN ('BLOCKED LIST','UNKNOWN','BLACKLIST',"
+            "'DENY','QUARANTINE')")
+        return rows
     return get_ise_client().get_unauthorized_endpoints()
 
 
@@ -566,7 +606,13 @@ def connection_status(*, use_cache: bool = True) -> dict:
 def connection_status_live(*, use_cache: bool = True) -> dict:
     """Actually probe ISE/FMC. Called by the scheduler, not the web request."""
     status = {}
-    if settings.ISE["ENABLED"]:
+    if _dc_on():
+        try:
+            get_dataconnect_client().test()
+            status["ISE"] = {"ok": True, "detail": "Data Connect (SQL) reachable."}
+        except Exception as exc:
+            status["ISE"] = {"ok": False, "detail": f"Data Connect: {exc}"[:200]}
+    elif settings.ISE["ENABLED"]:
         try:
             status["ISE"] = get_ise_client().test_connection()
         except ConfigError as exc:

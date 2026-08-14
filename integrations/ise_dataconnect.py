@@ -180,6 +180,19 @@ class DataConnectClient:
         _, rows = self.query(f"SELECT COUNT(*) AS n FROM {view}")
         return rows[0]["n"] if rows else None
 
+    def rows(self, view, columns, *, where="", binds=None, order="", limit=0):
+        """Simple SELECT of named columns (avoids SELECT * so odd columns can't
+        break the fetch). Returns list[dict]."""
+        sql = f"SELECT {', '.join(columns)} FROM {view}"
+        if where:
+            sql += f" WHERE {where}"
+        if order:
+            sql += f" ORDER BY {order}"
+        if limit:
+            sql += f" FETCH FIRST {int(limit)} ROWS ONLY"
+        _, rows = self.query(sql, binds or {})
+        return rows
+
     # -- IoT discovery ------------------------------------------------------
     def iot_endpoints(self, profiles, *, view, col_mac, col_profile,
                       col_group="", col_devicetype="", col_ip="", col_site="",
