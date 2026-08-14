@@ -23,6 +23,7 @@ Design notes
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 import xml.etree.ElementTree as ET
 
 import requests
@@ -167,25 +168,30 @@ class ISEClient:
                 out[p["id"]] = nm
         return out
 
-    def iot_endpoint_refs(self, *, logical_profiles=(), profile_ids=()):
+    def iot_endpoint_refs(self, *, logical_profiles=(), profile_ids=(), log=None):
         """Light ``{MAC: {id, mac, ...}}`` for IoT endpoints, via ERS server-side
         filters. ``logicalProfileName`` is preferred (one filtered call per
-        logical profile); ``profileId`` is the per-policy fallback."""
+        logical profile); ``profileId`` is the per-policy fallback. ``log`` gets
+        a line per filtered profile."""
+        say = log if callable(log) else (lambda *a, **k: None)
         refs = {}
-        for lp in logical_profiles:
-            if not lp:
-                continue
+        for i, lp in enumerate([x for x in logical_profiles if x], 1):
+            t = time.monotonic()
+            say(f"    [{i}] ERS filter=logicalProfileName.EQ.{lp} (page size {self.page_size})...")
             for e in self._ers_collection("/endpoint", {"filter": f"logicalProfileName.EQ.{lp}"}):
                 mac = (e.get("name") or "").upper()
                 if mac:
                     refs.setdefault(mac, {"id": e.get("id", ""), "mac": mac})["logical_profile"] = lp
-        for pid in profile_ids:
-            if not pid:
-                continue
+            say(f"    [{i}] {lp}: {len(refs)} MACs so far ({round(time.monotonic()-t,1)}s)")
+        pids = [x for x in profile_ids if x]
+        for i, pid in enumerate(pids, 1):
+            t = time.monotonic()
+            say(f"    [{i}/{len(pids)}] ERS filter=profileId.EQ.{pid} (page size {self.page_size})...")
             for e in self._ers_collection("/endpoint", {"filter": f"profileId.EQ.{pid}"}):
                 mac = (e.get("name") or "").upper()
                 if mac:
                     refs.setdefault(mac, {"id": e.get("id", ""), "mac": mac})["profile_id"] = pid
+            say(f"    [{i}/{len(pids)}] {len(refs)} MACs so far ({round(time.monotonic()-t,1)}s)")
         return refs
 
     def endpoint_detail(self, endpoint_id):
@@ -387,26 +393,37 @@ class ISEClient:
         """Full Open API endpoint object for one MAC (untruncated)."""
         return self._openapi_get(f"/endpoint/{mac.strip().upper()}")
 
-    def openapi_iot_endpoints(self, profile_ids):
+    def openapi_iot_endpoints(self, profile_ids, log=None):
         """``{MAC: endpoint_obj}`` for the given profileIds via the Open API
         filter. Falls back to one full paged scan (client-side filter) if this
-        ISE rejects the profileId filter."""
+        ISE rejects the profileId filter. ``log`` gets a line per API call."""
         ids = [p for p in profile_ids if p]
         if not ids:
             return {}
         try:
-            return self._openapi_by_filter(ids)
+            return self._openapi_by_filter(ids, log=log)
         except IntegrationError as exc:
             if getattr(exc, "status", None) == 400:   # filter unsupported
-                return self._openapi_full_scan(set(ids))
+                return self._openapi_full_scan(set(ids), log=log)
             raise
 
-    def _openapi_page(self, params):
+    def _openapi_page(self, params, log=None):
+        say = log if callable(log) else (lambda *a, **k: None)
         page, size = 1, self.openapi_page_size
         while page <= self.max_pages:
             q = {"size": size, "page": page}
             q.update(params)
-            batch = self._openapi_items(self._openapi_get("/endpoint", q))
+            t = time.monotonic()
+            try:
+                batch = self._openapi_items(self._openapi_get("/endpoint", q))
+            except Exception as exc:
+                say(f"      GET /api/v1/endpoint {params.get('filter','')} "
+                    f"page={page} size={size} -> ERROR after "
+                    f"{round(time.monotonic()-t,1)}s: {str(exc)[:80]}")
+                raise
+            say(f"      GET /api/v1/endpoint {params.get('filter','')} "
+                f"page={page} size={size} -> {len(batch)} rows "
+                f"({round(time.monotonic()-t,1)}s)")
             if not batch:
                 break
             yield from batch
@@ -414,18 +431,24 @@ class ISEClient:
                 break
             page += 1
 
-    def _openapi_by_filter(self, ids):
+    def _openapi_by_filter(self, ids, log=None):
+        say = log if callable(log) else (lambda *a, **k: None)
         out = {}
-        for pid in ids:
-            for obj in self._openapi_page({"filter": f"profileId.EQ.{pid}"}):
+        for i, pid in enumerate(ids, 1):
+            say(f"    [{i}/{len(ids)}] Open API filter=profileId.EQ.{pid}")
+            for obj in self._openapi_page({"filter": f"profileId.EQ.{pid}"}, log=log):
                 mac = (obj.get("mac") or obj.get("name") or "").upper()
                 if mac:
                     out[mac] = obj
+            say(f"    [{i}/{len(ids)}] profile done -> {len(out)} unique MACs so far")
         return out
 
-    def _openapi_full_scan(self, id_set):
+    def _openapi_full_scan(self, id_set, log=None):
+        say = log if callable(log) else (lambda *a, **k: None)
+        say("    Open API filter unsupported - scanning ALL endpoints "
+            "(client-side filter, slow)...")
         out = {}
-        for obj in self._openapi_page({}):
+        for obj in self._openapi_page({}, log=log):
             if obj.get("profileId") in id_set:
                 mac = (obj.get("mac") or obj.get("name") or "").upper()
                 if mac:

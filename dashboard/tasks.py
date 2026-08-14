@@ -143,19 +143,21 @@ def sync_iot_endpoints(log=None) -> dict:
     # 1. Discover IoT endpoints. Open API (primary): deviceType/vendor/ipAddress
     #    inline. ERS (fallback): light refs then per-endpoint detail.
     if cfg["USE_OPENAPI"]:
-        say("[sync] discovering IoT endpoints via Open API profileId filter...")
+        say(f"[sync] discovering IoT endpoints via Open API profileId filter "
+            f"(page size {cfg['OPENAPI_PAGE_SIZE']}, timeout {cfg['TIMEOUT']}s)...")
         try:
-            objs = ise.openapi_iot_endpoints(profile_ids)
+            objs = ise.openapi_iot_endpoints(profile_ids, log=say)
         except Exception as exc:
             return {"error": f"Open API endpoint fetch failed: {exc}"}
         base_rows = [ise.map_openapi_endpoint(o, profile_map) for o in objs.values()]
     else:
         logical = cfg.get("IOT_LOGICAL_PROFILES") or []
         how = f"logicalProfileName ({len(logical)})" if logical else f"profileId ({len(profile_ids)})"
-        say(f"[sync] discovering IoT endpoints via ERS {how} filter...")
+        say(f"[sync] discovering IoT endpoints via ERS {how} filter "
+            f"(page size {cfg['PAGE_SIZE']}, timeout {cfg['TIMEOUT']}s)...")
         try:
-            refs = (ise.iot_endpoint_refs(logical_profiles=logical) if logical
-                    else ise.iot_endpoint_refs(profile_ids=profile_ids))
+            refs = (ise.iot_endpoint_refs(logical_profiles=logical, log=say) if logical
+                    else ise.iot_endpoint_refs(profile_ids=profile_ids, log=say))
         except Exception as exc:
             return {"error": f"ERS endpoint fetch failed: {exc}"}
         base_rows = None
