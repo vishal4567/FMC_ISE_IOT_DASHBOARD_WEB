@@ -138,7 +138,13 @@
         <h6 class="card-title mb-0">Top IoT Devices at Risk <span class="text-muted small">(Widget 2 · all types)</span></h6>
         <a href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}" class="btn btn-sm btn-outline-secondary">Full report</a>
       </div>
-      {% include "dashboard/_atrisk_table.html" with rows=at_risk_top %}
+      <div class="js-lazy-table"
+           data-url="{% url 'dashboard:atrisk_partial' %}?site={{ filters.site|urlencode }}&range={{ filters.range }}">
+        <div class="text-center py-3">
+          <button type="button" class="btn btn-outline-primary btn-sm js-load-btn">↓ Load at-risk devices</button>
+          <div class="small text-muted mt-1">{{ widgets.at_risk }} device(s) at risk · click to view</div>
+        </div>
+      </div>
     </div></div>
   </div>
   <div class="col-lg-4">
@@ -233,7 +239,13 @@
   <!-- type top devices -->
   <div class="card shadow-sm"><div class="card-body">
     <h6 class="card-title">Top {{ selected_type }} devices at risk</h6>
-    {% include "dashboard/_atrisk_table.html" with rows=type_at_risk_top %}
+    <div class="js-lazy-table"
+         data-url="{% url 'dashboard:atrisk_partial' %}?site={{ filters.site|urlencode }}&range={{ filters.range }}&type={{ selected_type|urlencode }}">
+      <div class="text-center py-3">
+        <button type="button" class="btn btn-outline-primary btn-sm js-load-btn">↓ Load {{ selected_type }} devices at risk</button>
+        <div class="small text-muted mt-1">{{ type_metrics.at_risk }} device(s) at risk · click to view</div>
+      </div>
+    </div>
   </div></div>
   {% endif %}
 </div>
@@ -271,5 +283,20 @@
   trend('trendType', {{ type_trend_json|safe }});
   {% endif %}
   $(function(){ $('#type-table').DataTable({ paging:false, searching:false, info:false, order:[[3,'desc']] }); });
+
+  // Device-row tables stream in only on click — the dashboard itself is numbers.
+  $(function(){
+    $('.js-lazy-table').each(function(){
+      var box = this;
+      $(box).find('.js-load-btn').on('click', function(){
+        var url = box.getAttribute('data-url');
+        box.innerHTML = '<div class="text-center py-3 text-muted">Loading…</div>';
+        fetch(url, {headers:{'X-Requested-With':'XMLHttpRequest'}})
+          .then(function(r){ return r.text(); })
+          .then(function(html){ box.innerHTML = html; })
+          .catch(function(){ box.innerHTML = '<div class="text-danger small p-2">Failed to load devices.</div>'; });
+      });
+    });
+  });
 </script>
 {% endblock %}
