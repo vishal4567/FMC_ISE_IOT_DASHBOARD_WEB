@@ -67,149 +67,207 @@ def _scoped(events, hours=None, site=None, device_type=None):
 
 
 # --------------------------------------------------------------------------- #
+# DB-side aggregation. At millions of events we must NOT pull rows into Python;
+# these build a filtered queryset and let Postgres do the counting/summing so a
+# dashboard widget costs one GROUP BY, not a full-table load.
+# --------------------------------------------------------------------------- #
+def _base_qs(hours=None, site=None, device_type=None):
+    """Filtered SecurityEvent queryset (time window + site + device type)."""
+    from dashboard.models import SecurityEvent
+
+    window_h = hours if hours else EVENT_WINDOW_DAYS * 24
+    qs = SecurityEvent.objects.filter(
+        ts__gte=timezone.now() - timedelta(hours=window_h))
+    if site and site != SITES_ALL:
+        qs = qs.filter(site=site)
+    if device_type and device_type != SITES_ALL:
+        qs = qs.filter(device_type=device_type)
+    return qs
+
+
+# --------------------------------------------------------------------------- #
 # Datasets + widgets
 # --------------------------------------------------------------------------- #
-def all_events():
-    return _events()
+def all_events(limit=2000):
+    """Most-recent events (capped) for the table view. The detail/table API
+    paginates; never return the full multi-million-row set to Python."""
+    return [event_store._to_dict(e) for e in _base_qs().order_by("-ts")[:limit]]
 
 
 def sites():
-    return sorted({e.get("site") for e in _events() if e.get("site")})
+    return sorted(s for s in _base_qs()
+                  .values_list("site", flat=True).distinct() if s)
+
+
+_BLOCK = ("Blocked", "Would Block")
 
 
 def devices_at_risk(hours=None, site=None, device_type=None):
-    agg = {}
-    for e in _scoped(_events(), hours, site, device_type):
-        if e["event_type"] == "Connection":
-            continue
-        key = e["device_mac"]
-        d = agg.setdefault(
-            key,
-            {
-                "device_mac": key,
-                "device_ip": e.get("device_ip", ""),
-                "hostname": e.get("hostname", ""),
-                "device_type": e.get("device_type", ""),
-                "site": e.get("site", ""),
-                "in_ise": e.get("in_ise", False),
-                "event_count": 0,
-                "_worst": 5,
-                "threat_types": set(),
-                "blocked": 0,
-            },
+    from django.contrib.postgres.aggregates import BoolOr, StringAgg
+    from django.db.models import Count, Max, Q
+
+    rows = (
+        _base_qs(hours, site, device_type)
+        .exclude(event_type="Connection")
+        .values("device_mac")
+        .annotate(
+            event_count=Count("id"),
+            blocked=Count("id", filter=Q(action__in=_BLOCK)),
+            device_ip=Max("device_ip"),
+            hostname=Max("hostname"),
+            dev_type=Max("device_type"),
+            site_=Max("site"),
+            in_ise=BoolOr("in_ise"),
+            threat_types=StringAgg("event_type", delimiter=", ", distinct=True),
+            crit=Count("id", filter=Q(severity="Critical")),
+            high=Count("id", filter=Q(severity="High")),
+            med=Count("id", filter=Q(severity="Medium")),
+            low=Count("id", filter=Q(severity="Low")),
+            info=Count("id", filter=Q(severity="Informational")),
         )
-        d["event_count"] += 1
-        d["_worst"] = min(d["_worst"], SEVERITY_ORDER.index(e["severity"]) + 1)
-        d["threat_types"].add(e["event_type"])
-        if e["action"] in ("Blocked", "Would Block"):
-            d["blocked"] += 1
-    rows = []
-    for d in agg.values():
-        d["highest_severity"] = SEVERITY_ORDER[d.pop("_worst") - 1]
-        d["threat_types"] = ", ".join(sorted(d["threat_types"]))
-        d["ise_correlated"] = "Yes" if d.pop("in_ise") else "No (FMC-only)"
-        rows.append(d)
-    rows.sort(key=lambda r: (SEVERITY_ORDER.index(r["highest_severity"]),
-                             -r["event_count"]))
-    return rows
+    )
+    out = []
+    for r in rows:
+        counts = {"Critical": r["crit"], "High": r["high"], "Medium": r["med"],
+                  "Low": r["low"], "Informational": r["info"]}
+        highest = next((s for s in SEVERITY_ORDER if counts[s]), "Informational")
+        out.append({
+            "device_mac": r["device_mac"],
+            "device_ip": r["device_ip"] or "",
+            "hostname": r["hostname"] or "",
+            "device_type": r["dev_type"] or "",
+            "site": r["site_"] or "",
+            "event_count": r["event_count"],
+            "blocked": r["blocked"],
+            "highest_severity": highest,
+            "threat_types": r["threat_types"] or "",
+            "ise_correlated": "Yes" if r["in_ise"] else "No (FMC-only)",
+        })
+    out.sort(key=lambda r: (SEVERITY_ORDER.index(r["highest_severity"]),
+                            -r["event_count"]))
+    return out
 
 
 def attack_severity(hours=None, site=None, device_type=None):
-    counts = {s: 0 for s in SEVERITY_ORDER}
-    for e in _scoped(_events(), hours, site, device_type):
-        if e["event_type"] == "Connection":
-            continue
-        counts[e["severity"]] += 1
-    return [{"severity": s, "count": counts[s]} for s in SEVERITY_ORDER]
+    from django.db.models import Count
+
+    rows = (_base_qs(hours, site, device_type)
+            .exclude(event_type="Connection")
+            .values("severity").annotate(count=Count("id")))
+    by = {r["severity"]: r["count"] for r in rows}
+    return [{"severity": s, "count": by.get(s, 0)} for s in SEVERITY_ORDER]
 
 
 def trend(hours=24, site=None, device_type=None):
-    gran, keys, keyfn = _window(hours)
-    buckets = {
-        k: {"label": k, "traffic_mb": 0.0, "threats": 0, "blocked": 0, "allowed": 0}
-        for k in keys
-    }
-    for e in _apply_filters(_events(), site, device_type):
-        b = buckets.get(keyfn(e))
+    from django.db.models import Count, Q, Sum
+
+    gran, keys, _ = _window(hours)
+    # Group by the pre-computed hourly bucket column (UTC string, matches keys);
+    # fold to day in Python for the day granularity (few buckets).
+    grouped = (_base_qs(hours, site, device_type)
+               .values("hour")
+               .annotate(
+                   bytes_=Sum("total_bytes"),
+                   threats=Count("id", filter=~Q(event_type="Connection")),
+                   blocked=Count("id", filter=Q(action__in=_BLOCK)),
+                   allowed=Count("id", filter=~Q(action__in=_BLOCK)),
+               ))
+    agg = {k: {"traffic_mb": 0.0, "threats": 0, "blocked": 0, "allowed": 0}
+           for k in keys}
+    for g in grouped:
+        key = (g["hour"] or "") if gran == "hour" else (g["hour"] or "")[:10]
+        b = agg.get(key)
         if not b:
             continue
-        b["traffic_mb"] += (e.get("total_bytes") or 0) / 1_000_000
-        if e["event_type"] != "Connection":
-            b["threats"] += 1
-        if e["action"] in ("Blocked", "Would Block"):
-            b["blocked"] += 1
-        else:
-            b["allowed"] += 1
-    points = [buckets[k] for k in keys]
-    for p in points:
-        p["traffic_mb"] = round(p["traffic_mb"], 1)
-        p["display"] = p["label"][11:16] if gran == "hour" else p["label"][5:]
+        b["traffic_mb"] += (g["bytes_"] or 0) / 1_000_000
+        b["threats"] += g["threats"]
+        b["blocked"] += g["blocked"]
+        b["allowed"] += g["allowed"]
+    points = []
+    for k in keys:
+        b = agg[k]
+        points.append({
+            "label": k,
+            "traffic_mb": round(b["traffic_mb"], 1),
+            "threats": b["threats"], "blocked": b["blocked"], "allowed": b["allowed"],
+            "display": k[11:16] if gran == "hour" else k[5:],
+        })
     return {"granularity": gran, "points": points}
 
 
 def by_device_type(hours=None, site=None):
-    agg = {}
-    for e in _scoped(_events(), hours, site):
-        t = e.get("device_type") or "(unclassified)"
-        d = agg.setdefault(
-            t,
-            {"device_type": t, "_devices": set(), "events": 0, "threats": 0,
-             "critical": 0, "blocked": 0, "_bytes": 0},
-        )
-        d["_devices"].add(e["device_mac"])
-        d["events"] += 1
-        d["_bytes"] += e.get("total_bytes") or 0
-        if e["event_type"] != "Connection":
-            d["threats"] += 1
-            if e["severity"] == "Critical":
-                d["critical"] += 1
-        if e["action"] in ("Blocked", "Would Block"):
-            d["blocked"] += 1
-    rows = []
-    for d in agg.values():
-        d["devices"] = len(d.pop("_devices"))
-        d["traffic_mb"] = round(d.pop("_bytes") / 1_000_000, 1)
-        d["pct_blocked"] = round(100 * d["blocked"] / d["events"]) if d["events"] else 0
-        rows.append(d)
-    rows.sort(key=lambda r: (-r["threats"], -r["traffic_mb"]))
-    return rows
+    from django.db.models import Count, Q, Sum
+
+    rows = (_base_qs(hours, site)
+            .values("device_type")
+            .annotate(
+                devices=Count("device_mac", distinct=True),
+                events=Count("id"),
+                threats=Count("id", filter=~Q(event_type="Connection")),
+                critical=Count("id", filter=Q(severity="Critical")
+                               & ~Q(event_type="Connection")),
+                blocked=Count("id", filter=Q(action__in=_BLOCK)),
+                bytes_=Sum("total_bytes"),
+            ))
+    out = []
+    for r in rows:
+        events = r["events"] or 0
+        blocked = r["blocked"] or 0
+        out.append({
+            "device_type": r["device_type"] or "(unclassified)",
+            "devices": r["devices"] or 0,
+            "events": events,
+            "threats": r["threats"] or 0,
+            "critical": r["critical"] or 0,
+            "blocked": blocked,
+            "traffic_mb": round((r["bytes_"] or 0) / 1_000_000, 1),
+            "pct_blocked": round(100 * blocked / events) if events else 0,
+        })
+    out.sort(key=lambda r: (-r["threats"], -r["traffic_mb"]))
+    return out
 
 
-def insecure_transfers():
-    return [e for e in _events() if e.get("insecure_protocol")]
+def insecure_transfers(limit=1000):
+    return [event_store._to_dict(e) for e in _base_qs()
+            .filter(insecure_protocol=True).order_by("-ts")[:limit]]
 
 
-def outside_zone():
-    return [e for e in _events() if e.get("zone_violation")]
+def outside_zone(limit=1000):
+    return [event_store._to_dict(e) for e in _base_qs()
+            .filter(zone_violation=True).order_by("-ts")[:limit]]
 
 
 def summary(hours=None, site=None, device_type=None):
-    events = _scoped(_events(), hours, site, device_type)
-    threats = [e for e in events if e["event_type"] != "Connection"]
-    return {
-        "total_events": len(events),
-        "threat_events": len(threats),
-        "blocked": sum(1 for e in events if e["action"] in ("Blocked", "Would Block")),
-        "devices_at_risk": len({e["device_mac"] for e in threats}),
-        "critical": sum(1 for e in threats if e["severity"] == "Critical"),
-    }
+    from django.db.models import Count, Q
+
+    agg = _base_qs(hours, site, device_type).aggregate(
+        total_events=Count("id"),
+        threat_events=Count("id", filter=~Q(event_type="Connection")),
+        blocked=Count("id", filter=Q(action__in=_BLOCK)),
+        devices_at_risk=Count("device_mac", distinct=True,
+                              filter=~Q(event_type="Connection")),
+        critical=Count("id", filter=Q(severity="Critical")
+                       & ~Q(event_type="Connection")),
+    )
+    return {k: (v or 0) for k, v in agg.items()}
 
 
 # --------------------------------------------------------------------------- #
 # ISE <-> FMC correlation (REAL): FMC-seen devices vs the ISE inventory
 # --------------------------------------------------------------------------- #
 def device_inventory():
-    agg = {}
-    for e in _events():
-        d = agg.setdefault(
-            e["device_mac"],
-            {"mac": e["device_mac"], "ip": e.get("device_ip", ""),
-             "device_type": e.get("device_type", ""), "hostname": e.get("hostname", ""),
-             "site": e.get("site", ""), "in_ise": e.get("in_ise", False),
-             "event_count": 0},
-        )
-        d["event_count"] += 1
-    return list(agg.values())
+    from django.contrib.postgres.aggregates import BoolOr
+    from django.db.models import Count, Max
+
+    rows = (_base_qs()
+            .values("device_mac")
+            .annotate(event_count=Count("id"), ip=Max("device_ip"),
+                      device_type=Max("device_type"), hostname=Max("hostname"),
+                      site=Max("site"), in_ise=BoolOr("in_ise")))
+    return [{"mac": r["device_mac"], "ip": r["ip"] or "",
+             "device_type": r["device_type"] or "", "hostname": r["hostname"] or "",
+             "site": r["site"] or "", "in_ise": bool(r["in_ise"]),
+             "event_count": r["event_count"]} for r in rows]
 
 
 def correlate_to_ise():
@@ -245,9 +303,16 @@ def correlate_to_ise():
 
 
 def correlation_summary():
-    rows = correlate_to_ise()
-    matched = sum(1 for r in rows if r["correlation"] == "Matched")
-    total = len(rows)
+    """Distinct FMC-seen devices vs the ISE inventory — counted in the DB, no
+    per-event scan."""
+    from dashboard.models import IoTDevice
+
+    fmc_macs = {m.upper() for m in _base_qs()
+                .values_list("device_mac", flat=True).distinct() if m}
+    ise_macs = {m.upper() for m in
+                IoTDevice.objects.values_list("mac", flat=True) if m}
+    total = len(fmc_macs)
+    matched = len(fmc_macs & ise_macs)
     return {
         "total": total,
         "matched": matched,
@@ -263,7 +328,11 @@ def device_360(mac):
     from collections import Counter
     from dashboard.models import IoTDevice
 
-    events = [e for e in _events() if e["device_mac"] == mac]
+    from dashboard.models import SecurityEvent
+
+    cutoff = timezone.now() - timedelta(days=EVENT_WINDOW_DAYS)
+    events = [event_store._to_dict(e) for e in SecurityEvent.objects
+              .filter(device_mac=mac, ts__gte=cutoff).order_by("ts")]
     if not events:
         return {"found": False, "mac": mac}
 
