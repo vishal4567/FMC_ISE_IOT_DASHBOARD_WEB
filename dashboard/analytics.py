@@ -227,6 +227,18 @@ def by_device_type(hours=None, site=None):
     return out
 
 
+def ise_type_counts():
+    """Onboarded IoT-device count per device type, from the ISE inventory
+    (IoTDevice) — the authoritative 'how many of this type exist', as opposed to
+    by_device_type()'s 'how many were seen active in FMC events'."""
+    from django.db.models import Count
+
+    from dashboard.models import IoTDevice
+
+    return {r["device_type"]: r["n"] for r in
+            IoTDevice.objects.values("device_type").annotate(n=Count("id"))}
+
+
 def insecure_transfers(limit=1000):
     return [event_store._to_dict(e) for e in _base_qs()
             .filter(insecure_protocol=True).order_by("-ts")[:limit]]

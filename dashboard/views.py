@@ -42,6 +42,13 @@ def index(request):
     corr = analytics.correlation_summary()
     sum_all = analytics.summary(hours=hours, site=site)  # counts in one query
 
+    # "Devices" = ISE onboarded inventory for the type (not FMC-seen MACs). Keep
+    # the FMC-active count too, for context.
+    ise_counts = analytics.ise_type_counts()
+    for r in leaderboard:
+        r["active_devices"] = r["devices"]
+        r["devices"] = ise_counts.get(r["device_type"], r["devices"])
+
     # ===== Dashboard 2 - one DEVICE TYPE (default = most threats) =====
     types = [r["device_type"] for r in leaderboard]  # ordered by threats desc
     selected = request.GET.get("type")
@@ -55,7 +62,7 @@ def index(request):
                 if selected else {})
 
     type_metrics = {
-        "devices": t_row["devices"] if t_row else 0,
+        "devices": ise_counts.get(selected, 0),
         "at_risk": sum_type.get("devices_at_risk", 0),
         "threats": t_row["threats"] if t_row else 0,
         "critical": t_row["critical"] if t_row else 0,
