@@ -206,3 +206,49 @@ def _norm_action(action: str) -> str:
     if a in ("allow", "allowed", "trust", "pass"):
         return "Allowed"
     return action or "Allowed"
+
+
+# Clear-text service ports -> severity of an insecure-protocol connection.
+_INSECURE_SEVERITY = {23: "High", 21: "High", 513: "High", 69: "High",
+                      445: "Medium", 161: "Medium", 110: "Medium", 143: "Medium",
+                      80: "Low"}
+
+
+def classify_and_keep(ev: dict) -> bool:
+    """Decide whether a mapped event is worth storing, and for CONNECTION events
+    that are security-relevant, relabel them into a threat ``event_type`` with a
+    real ``severity`` so the threat/severity analytics (which key off
+    event_type != "Connection") pick them up.
+
+    Returns True to keep, False to drop. Rules:
+      * non-Connection (real Intrusion/Malware/File/SI) -> keep unchanged
+      * Connection that is blocked / insecure-protocol / zone-violation ->
+        relabel + severity, keep
+      * benign allowed Connection -> drop (that's the ~bulk of the feed)
+    """
+    if ev.get("event_type") != "Connection":
+        return True  # genuine threat record — keep as mapped
+
+    blocked = ev.get("action") in ("Blocked", "Would Block")
+    insecure = bool(ev.get("insecure_protocol"))
+    zone_v = bool(ev.get("zone_violation"))
+    if not (blocked or insecure or zone_v):
+        return False  # benign allowed flow — drop
+
+    # Priority: zone violation > insecure protocol > blocked.
+    if zone_v:
+        ev["event_type"] = "Zone Violation"
+        ev["severity"] = "High"
+    elif insecure:
+        ev["event_type"] = "Insecure Protocol"
+        ev["severity"] = _INSECURE_SEVERITY.get(ev.get("port"), "Medium")
+    else:  # blocked
+        ev["event_type"] = "Blocked Connection"
+        dz = str(ev.get("dst_zone") or "").lower()
+        ev["severity"] = "Medium" if any(z in dz for z in
+                                         ("out", "untrust", "dmz")) else "Low"
+    if not ev.get("threat_name"):
+        ev["threat_name"] = ev["event_type"]
+    if not ev.get("threat_category"):
+        ev["threat_category"] = "Connection-derived"
+    return True

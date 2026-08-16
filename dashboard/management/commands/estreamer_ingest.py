@@ -61,6 +61,11 @@ class Command(BaseCommand):
             help="also keep non-IoT Intrusion/Malware/Security-Intelligence "
                  "events even when they don't match an IoT device")
         parser.add_argument(
+            "--all-connections", action="store_true",
+            help="keep benign allowed connections too. Default: store only "
+                 "security-relevant connections (blocked / insecure-protocol / "
+                 "zone-violation), relabelled as threats, and drop benign flow.")
+        parser.add_argument(
             "--progress", type=int, default=30,
             help="seconds between throughput lines (seen/stored/drop%%) on "
                  "stderr. 0 = off. Default 30.")
@@ -83,13 +88,14 @@ class Command(BaseCommand):
 
         store_all = opts["store_all"]
         keep_threats = opts["keep_threats"]
+        all_connections = opts["all_connections"]
         progress = opts["progress"]
         _THREATS = ("Intrusion", "Malware", "Security Intelligence")
 
         ise_map = event_store.ise_identity_map()
         ip_map = event_store.ise_ip_map()
         batch, total, captured = [], 0, 0
-        seen, dropped, no_ip = 0, 0, 0
+        seen, dropped, no_ip, benign = 0, 0, 0, 0
         last_refresh = time.time()
         last_progress, last_seen = last_refresh, 0
 
@@ -138,6 +144,15 @@ class Command(BaseCommand):
 
                 ev = mapping.map_event(raw)
                 event_store.enrich_with_ise(ev, ise_map, ip_map)
+
+                # --- keep only security-relevant connections (relabel risky
+                #     flows as threats; drop benign allowed flow) ---
+                if not store_all and not all_connections:
+                    if not mapping.classify_and_keep(ev):
+                        benign += 1
+                        dropped += 1
+                        continue
+
                 batch.append(ev)
 
                 if len(batch) >= opts["batch"]:
@@ -150,7 +165,8 @@ class Command(BaseCommand):
                     pct = (100.0 * dropped / seen) if seen else 0.0
                     self.stderr.write(
                         f"[ingest] seen={seen} stored={total} dropped={dropped} "
-                        f"(no-ip={no_ip}, {pct:.1f}% filtered) in={rate:.0f}/s")
+                        f"(no-ip={no_ip}, benign={benign}, {pct:.1f}% filtered) "
+                        f"in={rate:.0f}/s")
                     last_progress, last_seen = now, seen
 
                 if now - last_refresh > 300:
@@ -171,5 +187,6 @@ class Command(BaseCommand):
                 f"Captured {captured} raw records to {opts['capture']}"))
         if not capture_only:
             self.stdout.write(self.style.SUCCESS(
-                f"\nIngested {total} IoT events (seen {seen}, dropped {dropped}: "
-                f"{no_ip} no-IP + {dropped - no_ip} non-IoT)."))
+                f"\nIngested {total} IoT security events (seen {seen}, dropped "
+                f"{dropped}: {no_ip} no-IP + {benign} benign-conn + "
+                f"{dropped - no_ip - benign} non-IoT)."))
