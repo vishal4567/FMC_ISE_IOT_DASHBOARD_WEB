@@ -71,6 +71,17 @@ def _scoped(events, hours=None, site=None, device_type=None):
 # these build a filtered queryset and let Postgres do the counting/summing so a
 # dashboard widget costs one GROUP BY, not a full-table load.
 # --------------------------------------------------------------------------- #
+# One filter bucket for devices with no real location — empty site OR the bare
+# ISE root "All Locations". Lets you scope to location-unknown devices (the bulk
+# of the data) without listing the root/blank as bogus separate sites.
+SITE_UNASSIGNED = "Unassigned / All Locations"
+
+
+def _unassigned_q():
+    from django.db.models import Q
+    return Q(site__isnull=True) | Q(site="") | Q(site__iexact="All Locations")
+
+
 def _base_qs(hours=None, site=None, device_type=None):
     """Filtered SecurityEvent queryset (time window + site + device type)."""
     from dashboard.models import SecurityEvent
@@ -79,7 +90,8 @@ def _base_qs(hours=None, site=None, device_type=None):
     qs = SecurityEvent.objects.filter(
         ts__gte=timezone.now() - timedelta(hours=window_h))
     if site and site != SITES_ALL:
-        qs = qs.filter(site=site)
+        qs = qs.filter(_unassigned_q()) if site == SITE_UNASSIGNED \
+            else qs.filter(site=site)
     if device_type and device_type != SITES_ALL:
         qs = qs.filter(device_type=device_type)
     return qs
@@ -114,7 +126,12 @@ def sites():
             continue
         seen.add(key)
         out.append(s)
-    return sorted(out)
+    out.sort()
+    # Add ONE "Unassigned" option (covers empty + bare root) so the large
+    # location-unknown population is still filterable, not lost.
+    if _base_qs().filter(_unassigned_q()).exists():
+        out.append(SITE_UNASSIGNED)
+    return out
 
 
 _BLOCK = ("Blocked", "Would Block")
