@@ -95,8 +95,21 @@ def all_events(limit=2000):
 
 
 def sites():
-    return sorted(s for s in _base_qs()
-                  .values_list("site", flat=True).distinct() if s)
+    """Distinct sites for the filter. Raw ISE location strings can differ only
+    by trailing/leading spaces or casing, which SQL DISTINCT keeps as separate
+    rows and makes the SAME site appear multiple times in the dropdown — so we
+    dedupe on a normalized (trimmed, case-folded) key here."""
+    seen, out = set(), []
+    for s in _base_qs().values_list("site", flat=True).distinct():
+        s = (s or "").strip()
+        if not s:
+            continue
+        key = s.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(s)
+    return sorted(out)
 
 
 _BLOCK = ("Blocked", "Would Block")
