@@ -94,16 +94,21 @@ def all_events(limit=2000):
     return [event_store._to_dict(e) for e in _base_qs().order_by("-ts")[:limit]]
 
 
+# The ISE Location tree root — devices behind an un-tagged NAD resolve here.
+# It's not a real site, so it's not offered as a filter option.
+_SITE_ROOT = {"all locations", "all location", "location all", "all", "-", "none"}
+
+
 def sites():
-    """Distinct sites for the filter. Raw ISE location strings can differ only
-    by trailing/leading spaces or casing, which SQL DISTINCT keeps as separate
-    rows and makes the SAME site appear multiple times in the dropdown — so we
-    dedupe on a normalized (trimmed, case-folded) key here."""
+    """Distinct real sites for the filter. ISE stores full hierarchy paths
+    (e.g. 'All Locations#Kochi'); the bare root 'All Locations' means the device
+    has no assigned location, so it's dropped. Also dedupes trimmed/case-folded
+    variants (SQL DISTINCT keeps whitespace/case differences as separate rows)."""
     seen, out = set(), []
     for s in _base_qs().values_list("site", flat=True).distinct():
         s = (s or "").strip()
-        if not s:
-            continue
+        if not s or s.casefold() in _SITE_ROOT:
+            continue  # empty or the bare 'All Locations' root — not a real site
         key = s.casefold()
         if key in seen:
             continue
