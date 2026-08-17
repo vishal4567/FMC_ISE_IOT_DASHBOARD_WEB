@@ -262,16 +262,32 @@ def by_device_type(hours=None, site=None):
     return out
 
 
-def ise_type_counts():
-    """Onboarded IoT-device count per device type, from the ISE inventory
-    (IoTDevice) — the authoritative 'how many of this type exist', as opposed to
-    by_device_type()'s 'how many were seen active in FMC events'."""
-    from django.db.models import Count
-
+def _iot_qs(site=None):
+    """ISE inventory (IoTDevice), filtered by the SAME site rules as the event
+    views so the device tiles move with the Site filter. IoTDevice.site holds
+    the same value events inherit, incl. the Unassigned (empty/root) bucket."""
     from dashboard.models import IoTDevice
 
+    qs = IoTDevice.objects.all()
+    if site and site != SITES_ALL:
+        qs = qs.filter(_unassigned_q()) if site == SITE_UNASSIGNED \
+            else qs.filter(site=site)
+    return qs
+
+
+def ise_device_count(site=None):
+    """Onboarded IoT device total from the ISE inventory, honoring Site."""
+    return _iot_qs(site).count()
+
+
+def ise_type_counts(site=None):
+    """Onboarded IoT-device count per device type, from the ISE inventory
+    (IoTDevice), honoring Site — the authoritative 'how many of this type exist',
+    as opposed to by_device_type()'s 'how many were seen active in FMC events'."""
+    from django.db.models import Count
+
     return {r["device_type"]: r["n"] for r in
-            IoTDevice.objects.values("device_type").annotate(n=Count("id"))}
+            _iot_qs(site).values("device_type").annotate(n=Count("id"))}
 
 
 def insecure_transfers(limit=1000):

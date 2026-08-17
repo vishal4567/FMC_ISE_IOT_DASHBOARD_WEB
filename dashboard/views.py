@@ -34,7 +34,7 @@ def index(request):
     # The at-risk *device rows* are NOT computed here; they stream in via
     # atrisk_partial (api/atrisk/) only when the user opens the table. The page
     # itself carries counts/charts (all cheap DB aggregations), no row lists.
-    total_devices = services.ise_endpoint_count(use_cache=not refresh)  # cheap count
+    total_devices = analytics.ise_device_count(site=site)  # ISE inventory, site-aware
     unauthorized = count("ise-unauthorized")
     trend_all = analytics.trend(hours, site=site)
     severity_all = analytics.attack_severity(hours=hours, site=site)
@@ -44,7 +44,7 @@ def index(request):
 
     # "Devices" = ISE onboarded inventory for the type (not FMC-seen MACs). Keep
     # the FMC-active count too, for context.
-    ise_counts = analytics.ise_type_counts()
+    ise_counts = analytics.ise_type_counts(site=site)
     for r in leaderboard:
         r["active_devices"] = r["devices"]
         r["devices"] = ise_counts.get(r["device_type"], r["devices"])
