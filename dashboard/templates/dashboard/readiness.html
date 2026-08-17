@@ -79,20 +79,4 @@
 </div>
 {% endfor %}
 
-<div class="alert alert-light border small">
-  <strong>To light up the amber / blue rows:</strong> add an FMC event source
-  (eStreamer + eNcore collector, or Security Analytics &amp; Logging) so live
-  events land in the app's database, and use a write-capable ISE account for
-  quarantine/ANC actions. The controls above confirm the enforcement side is in
-  place; only the event feed is missing.
-</div>
-<div class="alert alert-info small">
-  <strong>Preview the event-driven widgets:</strong> the
-  <a href="{% url 'dashboard:index' %}" class="alert-link">Dashboard</a>
-  (Widgets 2, 4, 5) and the
-  <a href="{% url 'dashboard:mapping' %}" class="alert-link">ISE ↔ FMC Mapping</a>
-  window use a representative sample event feed grounded in this environment's
-  real MACs, zones, rules and policies — a stand-in until a real event feed
-  (eStreamer / SAL) is connected.
-</div>
 {% endblock %}

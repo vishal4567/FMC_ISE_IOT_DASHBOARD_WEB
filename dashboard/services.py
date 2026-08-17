@@ -422,7 +422,7 @@ DATASETS: dict[str, Dataset] = {
             "connection events are NOT in the REST API - they require "
             "eStreamer / Security Analytics & Logging.",
         ),
-        # ---- FMC event feed (representative sample - see analytics.py) ----
+        # ---- FMC event feed (eStreamer -> DB, see analytics.py) ----
         Dataset(
             key="sim-events",
             label="FMC Events",
@@ -431,8 +431,7 @@ DATASETS: dict[str, Dataset] = {
             derived=True,
             widget="Events feed (intrusion/connection/malware/file/SI)",
             description="FMC event feed (intrusion / connection / malware / "
-            "file / security-intelligence), grounded in real MACs, zones, "
-            "rules and policies.",
+            "file / security-intelligence).",
         ),
         Dataset(
             key="sim-devices-at-risk",
