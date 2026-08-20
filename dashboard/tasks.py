@@ -195,21 +195,29 @@ def sync_iot_endpoints(log=None) -> dict:
         if not base_rows:
             return {"iot_endpoints": 0, "note": "Data Connect returned no IoT endpoints"}
 
-        # Backfill endpoint IP from endpoints_data when the discovery source
-        # (e.g. RADIUS summary) carries no endpoint-IP column. IP bridges
-        # FMC (IP-based) events to the ISE device, so keep it populated.
-        need_ip = [r["mac"] for r in base_rows if not r.get("ip")]
-        if need_ip and dc_cfg["COL_IP"]:
+        # Backfill endpoint IP + device type (profiling policy) from
+        # endpoints_data when the discovery source (e.g. RADIUS summary) lacks
+        # them. IP bridges FMC (IP-based) events to the ISE device; device_type
+        # drives the dashboard's per-type views.
+        need = [r["mac"] for r in base_rows
+                if not r.get("ip") or not r.get("device_type")]
+        if need and dc_cfg["ENDPOINTS_VIEW"]:
             try:
-                ipmap = dc.ip_by_mac(need_ip, view=dc_cfg["ENDPOINTS_VIEW"],
-                                     mac_col=dc_cfg["COL_MAC"], ip_col=dc_cfg["COL_IP"])
+                attrs = dc.endpoint_attrs_by_mac(
+                    need, view=dc_cfg["ENDPOINTS_VIEW"], mac_col=dc_cfg["COL_MAC"],
+                    ip_col=dc_cfg["COL_IP"], profile_col=dc_cfg["COL_PROFILE"])
                 for r in base_rows:
+                    a = attrs.get(r["mac"])
+                    if not a:
+                        continue
                     if not r.get("ip"):
-                        r["ip"] = ipmap.get(r["mac"], "")
-                say(f"[sync] backfilled IP for {sum(1 for r in base_rows if r.get('ip'))}"
-                    f"/{len(base_rows)} devices from {dc_cfg['ENDPOINTS_VIEW']}")
+                        r["ip"] = a["ip"]
+                    if not r.get("device_type"):
+                        r["device_type"] = a["profile"]
+                say(f"[sync] backfilled ip/device_type from {dc_cfg['ENDPOINTS_VIEW']}"
+                    f" for {len(attrs)} devices")
             except Exception as exc:
-                say(f"[sync] IP backfill failed: {exc}")
+                say(f"[sync] endpoints backfill failed: {exc}")
     elif cfg["USE_OPENAPI"]:
         mode = "scan-all + client filter" if cfg["OPENAPI_SCAN_ALL"] else "profileId filter"
         say(f"[sync] discovering IoT endpoints via Open API {mode} "

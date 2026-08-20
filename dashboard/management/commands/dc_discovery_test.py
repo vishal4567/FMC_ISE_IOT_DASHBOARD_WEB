@@ -62,26 +62,34 @@ class Command(BaseCommand):
                 f"{str(r['device_type'])[:16]:16} {str(r['ip'])[:16]:16} "
                 f"{r.get('authz_profile', '')}")
 
-        # ---- 1b. IP backfill from endpoints_data (summary may lack endpoint IP) ----
-        need_ip = [r["mac"] for r in rows if not r.get("ip")]
-        if need_ip and dc["COL_IP"]:
+        # ---- 1b. IP + device_type backfill from endpoints_data ----
+        need = [r["mac"] for r in rows
+                if not r.get("ip") or not r.get("device_type")]
+        if need and dc["ENDPOINTS_VIEW"]:
             self.stdout.write("")
             self.stdout.write(self.style.MIGRATE_HEADING(
-                "== 1b. IP backfill from endpoints view =="))
+                "== 1b. IP + device_type backfill from endpoints view =="))
             try:
-                ipmap = client.ip_by_mac(need_ip, view=dc["ENDPOINTS_VIEW"],
-                                         mac_col=dc["COL_MAC"], ip_col=dc["COL_IP"])
+                attrs = client.endpoint_attrs_by_mac(
+                    need, view=dc["ENDPOINTS_VIEW"], mac_col=dc["COL_MAC"],
+                    ip_col=dc["COL_IP"], profile_col=dc["COL_PROFILE"])
                 for r in rows:
+                    a = attrs.get(r["mac"])
+                    if not a:
+                        continue
                     if not r.get("ip"):
-                        r["ip"] = ipmap.get(r["mac"], "")
-                have = sum(1 for r in rows if r.get("ip"))
+                        r["ip"] = a["ip"]
+                    if not r.get("device_type"):
+                        r["device_type"] = a["profile"]
+                have_ip = sum(1 for r in rows if r.get("ip"))
+                have_dt = sum(1 for r in rows if r.get("device_type"))
                 self.stdout.write(self.style.SUCCESS(
-                    f"  {have}/{len(rows)} have an IP after backfill "
-                    f"(from {dc['ENDPOINTS_VIEW']})"))
+                    f"  ip {have_ip}/{len(rows)}, device_type {have_dt}/{len(rows)} "
+                    f"after backfill (from {dc['ENDPOINTS_VIEW']})"))
             except Exception as exc:
-                self.stdout.write(self.style.ERROR(f"  ip backfill FAILED: {exc}"))
+                self.stdout.write(self.style.ERROR(f"  backfill FAILED: {exc}"))
                 self.stdout.write("  -> fix ISE_DC_ENDPOINTS_VIEW / ISE_DC_COL_MAC / "
-                                  "ISE_DC_COL_IP.")
+                                  "ISE_DC_COL_IP / ISE_DC_COL_PROFILE.")
 
         # ---- 2. location by NAD hostname ----
         self.stdout.write("")

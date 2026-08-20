@@ -367,6 +367,38 @@ class DataConnectClient:
                         out[str(r["mac"]).upper()] = str(r.get("ip") or "")
         return out
 
+    def endpoint_attrs_by_mac(self, macs, *, view="endpoints_data",
+                              mac_col="mac_address", ip_col="endpoint_ip",
+                              profile_col="endpoint_policy"):
+        """``{MAC: {'ip':.., 'profile':..}}`` from the endpoints view - backfills
+        endpoint IP and the profiling policy (device type) when the discovery
+        source (e.g. RADIUS summary) lacks them. Batched IN (900)."""
+        want = [m.upper() for m in macs if m]
+        cols = [f"{mac_col} AS mac"]
+        if ip_col:
+            cols.append(f"MAX({ip_col}) AS ip")
+        if profile_col:
+            cols.append(f"MAX({profile_col}) AS profile")
+        out = {}
+        with self.session():
+            for i in range(0, len(want), 900):
+                chunk = want[i:i + 900]
+                binds = {f"m{j}": m for j, m in enumerate(chunk)}
+                inlist = ", ".join(f":{k}" for k in binds)
+                sql = (f"SELECT {', '.join(cols)} FROM {view} "
+                       f"WHERE UPPER({mac_col}) IN ({inlist}) GROUP BY {mac_col}")
+                try:
+                    _, rows = self.query(sql, binds)
+                except DataConnectError:
+                    continue
+                for r in rows:
+                    if r.get("mac"):
+                        out[str(r["mac"]).upper()] = {
+                            "ip": str(r.get("ip") or ""),
+                            "profile": str(r.get("profile") or ""),
+                        }
+        return out
+
     def location_by_mac(self, macs, *, view="radius_authentications",
                         mac_col="calling_station_id", loc_col="location",
                         days=0, time_col="timestamp"):
