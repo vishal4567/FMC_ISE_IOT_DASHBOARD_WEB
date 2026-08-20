@@ -335,3 +335,68 @@ class DataConnectClient:
                     if r.get("mac"):
                         out[str(r["mac"]).upper()] = _loc_leaf(r.get("site", ""))
         return out
+
+    # ------------------------------------------------------------------ #
+    # Location from the NAD HOSTNAME (site-code table) instead of the
+    # RADIUS location hierarchy: endpoint --nas_ip--> NETWORK_DEVICES.name
+    # (hostname) --site-code--> friendly site name.
+    # ------------------------------------------------------------------ #
+    def nad_ip_to_hostname(self, *, view="network_devices", name_col="name",
+                           ip_col="ip_mask"):
+        """``{nad_ip: hostname}`` from NETWORK_DEVICES. ``ip_mask`` may be
+        '10.1.2.3/32' or '10.1.2.3 255.255.255.255' - keyed on the bare IP."""
+        _, rows = self.query(f"SELECT {name_col} AS name, {ip_col} AS ip "
+                             f"FROM {view}")
+        out = {}
+        for r in rows:
+            raw = str(r.get("ip") or "")
+            ip = raw.replace("/", " ").split()[0].strip() if raw else ""
+            if ip:
+                out[ip] = str(r.get("name") or "")
+        return out
+
+    def nas_ip_by_mac(self, macs, *, view="radius_authentication_summary",
+                      mac_col="calling_station_id", nas_col="nas_ip_address"):
+        """``{MAC: nas_ip}`` - which NAD each endpoint authenticated through.
+        Indexed IN filter on the MAC column, batched at 900."""
+        want = [m.upper() for m in macs if m]
+        out = {}
+        with self.session():
+            for i in range(0, len(want), 900):
+                chunk = want[i:i + 900]
+                binds = {f"m{j}": m for j, m in enumerate(chunk)}
+                inlist = ", ".join(f":{k}" for k in binds)
+                sql = (f"SELECT {mac_col} AS mac, MAX({nas_col}) AS nas_ip "
+                       f"FROM {view} WHERE {mac_col} IN ({inlist}) "
+                       f"AND {nas_col} IS NOT NULL GROUP BY {mac_col}")
+                try:
+                    _, rows = self.query(sql, binds)
+                except DataConnectError:
+                    continue
+                for r in rows:
+                    if r.get("mac"):
+                        out[str(r["mac"]).upper()] = str(r.get("nas_ip") or "")
+        return out
+
+    def location_by_nad_hostname(self, macs, *, nd_view="network_devices",
+                                 nd_name_col="name", nd_ip_col="ip_mask",
+                                 radius_view="radius_authentication_summary",
+                                 mac_col="calling_station_id",
+                                 nas_col="nas_ip_address"):
+        """``{MAC: site}`` derived from the endpoint's NAD hostname via the
+        site-code table (integrations/location_map). Two small queries: the NAD
+        inventory (IP->hostname) and the endpoints' nas_ip - then match in code."""
+        from integrations.location_map import build_matcher, site_from_hostname
+
+        matcher = build_matcher()
+        ip_host = self.nad_ip_to_hostname(view=nd_view, name_col=nd_name_col,
+                                          ip_col=nd_ip_col)
+        self._say(f"[dc] {len(ip_host)} NADs from {nd_view}")
+        mac_nas = self.nas_ip_by_mac(macs, view=radius_view, mac_col=mac_col,
+                                     nas_col=nas_col)
+        out = {}
+        for mac, nas_ip in mac_nas.items():
+            out[mac] = site_from_hostname(ip_host.get(nas_ip, ""), matcher)
+        matched = sum(1 for v in out.values() if v)
+        self._say(f"[dc] NAD-hostname location: {matched}/{len(out)} macs -> site")
+        return out

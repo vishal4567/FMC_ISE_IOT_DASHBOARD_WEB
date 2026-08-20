@@ -323,6 +323,16 @@ DATACONNECT = {
     # current-state); 7-30 for the full RADIUS_AUTHENTICATIONS log.
     "LOCATION_DAYS": _env_int("ISE_DC_LOCATION_DAYS", 0),
     "COL_LOC_TIME": os.environ.get("ISE_DC_COL_LOC_TIME", "timestamp"),
+    # Location from the NAD HOSTNAME (site-code table, integrations/location_map)
+    # instead of the RADIUS 'location' hierarchy - more reliable when NADs aren't
+    # tagged with Location groups. endpoint -> nas_ip -> NETWORK_DEVICES.name
+    # (hostname) -> site. Confirm the NETWORK_DEVICES columns first with
+    #   manage.py probe_dataconnect --one network_devices
+    "LOCATION_BY_NAD_HOSTNAME": _env_bool("ISE_DC_LOCATION_BY_NAD_HOSTNAME", False),
+    "ND_VIEW": os.environ.get("ISE_DC_ND_VIEW", "network_devices"),
+    "ND_NAME_COL": os.environ.get("ISE_DC_ND_NAME_COL", "name"),
+    "ND_IP_COL": os.environ.get("ISE_DC_ND_IP_COL", "ip_mask"),
+    "COL_NAS_IP": os.environ.get("ISE_DC_COL_NAS_IP", "nas_ip_address"),
     # 'ISE Sessions' report: fetch the ACTIVE sessions once, then drop non-IoT
     # devices in code. SESSIONS_VIEW is the active-sessions source; SESSIONS_WHERE
     # optionally scopes to active records (e.g. on radius_accounting:

@@ -225,13 +225,21 @@ def sync_iot_endpoints(log=None) -> dict:
     # instead of a per-device MnT/NAD lookup.
     if dc_mode and not dc_cfg["COL_SITE"] and method != "off" and dc_cfg["LOCATION_VIEW"]:
         macs = [r["mac"] for r in base_rows]
+        by_nad = dc_cfg.get("LOCATION_BY_NAD_HOSTNAME")
         say(f"[sync] Data Connect: resolving location for {len(macs)} devices "
-            f"via {dc_cfg['LOCATION_VIEW']}...")
+            f"via {'NAD hostname' if by_nad else dc_cfg['LOCATION_VIEW']}...")
         try:
-            dc_loc = dc.location_by_mac(
-                macs, view=dc_cfg["LOCATION_VIEW"],
-                mac_col=dc_cfg["COL_LOC_MAC"], loc_col=dc_cfg["COL_LOC_SITE"],
-                days=dc_cfg["LOCATION_DAYS"], time_col=dc_cfg["COL_LOC_TIME"])
+            if by_nad:
+                dc_loc = dc.location_by_nad_hostname(
+                    macs, nd_view=dc_cfg["ND_VIEW"],
+                    nd_name_col=dc_cfg["ND_NAME_COL"], nd_ip_col=dc_cfg["ND_IP_COL"],
+                    radius_view=dc_cfg["LOCATION_VIEW"],
+                    mac_col=dc_cfg["COL_LOC_MAC"], nas_col=dc_cfg["COL_NAS_IP"])
+            else:
+                dc_loc = dc.location_by_mac(
+                    macs, view=dc_cfg["LOCATION_VIEW"],
+                    mac_col=dc_cfg["COL_LOC_MAC"], loc_col=dc_cfg["COL_LOC_SITE"],
+                    days=dc_cfg["LOCATION_DAYS"], time_col=dc_cfg["COL_LOC_TIME"])
             say(f"[sync] location resolved for {len(dc_loc)} devices")
             for r in base_rows:
                 if not r.get("site"):
