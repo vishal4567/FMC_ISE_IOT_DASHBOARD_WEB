@@ -343,6 +343,30 @@ class DataConnectClient:
         self._say(f"[dc] IoT-by-authz ('{match}'): {len(out)} unique MACs")
         return out
 
+    def ip_by_mac(self, macs, *, view="endpoints_data", mac_col="mac_address",
+                  ip_col="endpoint_ip"):
+        """``{MAC: ip}`` from the endpoints view - used to backfill the device IP
+        when the discovery source (e.g. RADIUS summary) has no endpoint-IP
+        column. Batched IN (900)."""
+        want = [m.upper() for m in macs if m]
+        out = {}
+        with self.session():
+            for i in range(0, len(want), 900):
+                chunk = want[i:i + 900]
+                binds = {f"m{j}": m for j, m in enumerate(chunk)}
+                inlist = ", ".join(f":{k}" for k in binds)
+                sql = (f"SELECT {mac_col} AS mac, MAX({ip_col}) AS ip "
+                       f"FROM {view} WHERE UPPER({mac_col}) IN ({inlist}) "
+                       f"AND {ip_col} IS NOT NULL GROUP BY {mac_col}")
+                try:
+                    _, rows = self.query(sql, binds)
+                except DataConnectError:
+                    continue
+                for r in rows:
+                    if r.get("mac"):
+                        out[str(r["mac"]).upper()] = str(r.get("ip") or "")
+        return out
+
     def location_by_mac(self, macs, *, view="radius_authentications",
                         mac_col="calling_station_id", loc_col="location",
                         days=0, time_col="timestamp"):

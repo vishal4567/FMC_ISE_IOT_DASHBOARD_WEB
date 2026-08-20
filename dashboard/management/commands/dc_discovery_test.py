@@ -62,6 +62,27 @@ class Command(BaseCommand):
                 f"{str(r['device_type'])[:16]:16} {str(r['ip'])[:16]:16} "
                 f"{r.get('authz_profile', '')}")
 
+        # ---- 1b. IP backfill from endpoints_data (summary may lack endpoint IP) ----
+        need_ip = [r["mac"] for r in rows if not r.get("ip")]
+        if need_ip and dc["COL_IP"]:
+            self.stdout.write("")
+            self.stdout.write(self.style.MIGRATE_HEADING(
+                "== 1b. IP backfill from endpoints view =="))
+            try:
+                ipmap = client.ip_by_mac(need_ip, view=dc["ENDPOINTS_VIEW"],
+                                         mac_col=dc["COL_MAC"], ip_col=dc["COL_IP"])
+                for r in rows:
+                    if not r.get("ip"):
+                        r["ip"] = ipmap.get(r["mac"], "")
+                have = sum(1 for r in rows if r.get("ip"))
+                self.stdout.write(self.style.SUCCESS(
+                    f"  {have}/{len(rows)} have an IP after backfill "
+                    f"(from {dc['ENDPOINTS_VIEW']})"))
+            except Exception as exc:
+                self.stdout.write(self.style.ERROR(f"  ip backfill FAILED: {exc}"))
+                self.stdout.write("  -> fix ISE_DC_ENDPOINTS_VIEW / ISE_DC_COL_MAC / "
+                                  "ISE_DC_COL_IP.")
+
         # ---- 2. location by NAD hostname ----
         self.stdout.write("")
         self.stdout.write(self.style.MIGRATE_HEADING(

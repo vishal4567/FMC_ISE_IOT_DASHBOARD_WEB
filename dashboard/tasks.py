@@ -194,6 +194,22 @@ def sync_iot_endpoints(log=None) -> dict:
         say(f"[sync] Data Connect returned {len(base_rows)} IoT endpoints")
         if not base_rows:
             return {"iot_endpoints": 0, "note": "Data Connect returned no IoT endpoints"}
+
+        # Backfill endpoint IP from endpoints_data when the discovery source
+        # (e.g. RADIUS summary) carries no endpoint-IP column. IP bridges
+        # FMC (IP-based) events to the ISE device, so keep it populated.
+        need_ip = [r["mac"] for r in base_rows if not r.get("ip")]
+        if need_ip and dc_cfg["COL_IP"]:
+            try:
+                ipmap = dc.ip_by_mac(need_ip, view=dc_cfg["ENDPOINTS_VIEW"],
+                                     mac_col=dc_cfg["COL_MAC"], ip_col=dc_cfg["COL_IP"])
+                for r in base_rows:
+                    if not r.get("ip"):
+                        r["ip"] = ipmap.get(r["mac"], "")
+                say(f"[sync] backfilled IP for {sum(1 for r in base_rows if r.get('ip'))}"
+                    f"/{len(base_rows)} devices from {dc_cfg['ENDPOINTS_VIEW']}")
+            except Exception as exc:
+                say(f"[sync] IP backfill failed: {exc}")
     elif cfg["USE_OPENAPI"]:
         mode = "scan-all + client filter" if cfg["OPENAPI_SCAN_ALL"] else "profileId filter"
         say(f"[sync] discovering IoT endpoints via Open API {mode} "
