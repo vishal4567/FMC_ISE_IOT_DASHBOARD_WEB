@@ -254,8 +254,12 @@ def sync_iot_endpoints(log=None) -> dict:
                     days=dc_cfg["LOCATION_DAYS"], time_col=dc_cfg["COL_LOC_TIME"])
             say(f"[sync] location resolved for {len(dc_loc)} devices")
             for r in base_rows:
-                if not r.get("site"):
-                    r["site"] = dc_loc.get(r["mac"], "")
+                site = dc_loc.get(r["mac"], "")
+                if by_nad:
+                    if site:            # NAD hostname is authoritative when matched
+                        r["site"] = site
+                elif not r.get("site"):
+                    r["site"] = site
         except Exception as exc:
             say(f"[sync] Data Connect location query failed: {exc}")
 
