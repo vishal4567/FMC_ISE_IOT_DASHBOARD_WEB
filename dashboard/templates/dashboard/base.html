@@ -21,6 +21,7 @@
       <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:mapping' %}">ISE ↔ FMC Mapping</a></li>
       <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:reports' %}">Reports</a></li>
       <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:readiness' %}">Policy Readiness</a></li>
+      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:config_sites' %}">⚙ Config</a></li>
     </ul>
     <form class="d-flex" role="search" action="{% url 'dashboard:device_search' %}" method="get">
       <input class="form-control form-control-sm" type="search" name="q"

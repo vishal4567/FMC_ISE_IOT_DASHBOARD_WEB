@@ -378,17 +378,21 @@ class DataConnectClient:
                         out[str(r["mac"]).upper()] = str(r.get("nas_ip") or "")
         return out
 
-    def location_by_nad_hostname(self, macs, *, nd_view="network_devices",
+    def location_by_nad_hostname(self, macs, *, matcher=None,
+                                 nd_view="network_devices",
                                  nd_name_col="name", nd_ip_col="ip_mask",
                                  radius_view="radius_authentication_summary",
                                  mac_col="calling_station_id",
                                  nas_col="nas_ip_address"):
         """``{MAC: site}`` derived from the endpoint's NAD hostname via the
-        site-code table (integrations/location_map). Two small queries: the NAD
-        inventory (IP->hostname) and the endpoints' nas_ip - then match in code."""
+        site-code table. ``matcher`` is a build_matcher() result (pass the
+        DB-backed one from dashboard.site_mapping; defaults to the built-in
+        list). Two small queries: the NAD inventory (IP->hostname) and the
+        endpoints' nas_ip - then match in code."""
         from integrations.location_map import build_matcher, site_from_hostname
 
-        matcher = build_matcher()
+        if matcher is None:
+            matcher = build_matcher()
         ip_host = self.nad_ip_to_hostname(view=nd_view, name_col=nd_name_col,
                                           ip_col=nd_ip_col)
         self._say(f"[dc] {len(ip_host)} NADs from {nd_view}")

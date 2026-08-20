@@ -128,3 +128,25 @@ class Snapshot(models.Model):
 
     def __str__(self):
         return f"{self.name} @ {self.fetched_at}"
+
+
+class SiteCode(models.Model):
+    """Editable NAD-hostname -> site mapping (the site-code table). The sync
+    resolves each device's site by finding the row whose ``code`` appears in the
+    device's NAD hostname; the longest matching code wins. Managed from the
+    in-app Config page (dashboard:config_sites)."""
+
+    code = models.CharField(
+        max_length=64, unique=True,
+        help_text="Substring found in the NAD hostname, e.g. INBLRKOD")
+    site = models.CharField(
+        max_length=64,
+        help_text="Friendly site name shown in the dashboard, e.g. Kodathi")
+    active = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["site", "code"]
+
+    def __str__(self):
+        return f"{self.code} -> {self.site}"

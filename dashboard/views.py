@@ -266,3 +266,47 @@ def _stringify(value):
 
         return json.dumps(value, ensure_ascii=False)
     return value
+
+
+def config_sites(request):
+    """In-app admin config: manage the NAD-hostname -> site mapping (SiteCode).
+    Add / edit / delete / enable rows, and test a hostname against the map."""
+    from dashboard.models import SiteCode
+    from dashboard.site_mapping import db_site_matcher
+    from integrations.location_map import site_from_hostname
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        rid = request.POST.get("id")
+        code = (request.POST.get("code") or "").strip()
+        site = (request.POST.get("site") or "").strip()
+        if action == "add" and code and site:
+            SiteCode.objects.update_or_create(
+                code=code, defaults={"site": site, "active": True})
+        elif action == "delete" and rid:
+            SiteCode.objects.filter(id=rid).delete()
+        elif action == "toggle" and rid:
+            row = SiteCode.objects.filter(id=rid).first()
+            if row:
+                row.active = not row.active
+                row.save(update_fields=["active", "updated_at"])
+        elif action == "edit" and rid:
+            row = SiteCode.objects.filter(id=rid).first()
+            if row:
+                if code:
+                    row.code = code
+                if site:
+                    row.site = site
+                row.save(update_fields=["code", "site", "updated_at"])
+        return redirect("dashboard:config_sites")
+
+    test_host = (request.GET.get("test") or "").strip()
+    test_result = (site_from_hostname(test_host, db_site_matcher())
+                   if test_host else None)
+    context = {
+        "rows": SiteCode.objects.all(),
+        "active_count": SiteCode.objects.filter(active=True).count(),
+        "test_host": test_host,
+        "test_result": test_result,
+    }
+    return render(request, "dashboard/config_sites.html", context)

@@ -230,8 +230,9 @@ def sync_iot_endpoints(log=None) -> dict:
             f"via {'NAD hostname' if by_nad else dc_cfg['LOCATION_VIEW']}...")
         try:
             if by_nad:
+                from dashboard.site_mapping import db_site_matcher
                 dc_loc = dc.location_by_nad_hostname(
-                    macs, nd_view=dc_cfg["ND_VIEW"],
+                    macs, matcher=db_site_matcher(), nd_view=dc_cfg["ND_VIEW"],
                     nd_name_col=dc_cfg["ND_NAME_COL"], nd_ip_col=dc_cfg["ND_IP_COL"],
                     radius_view=dc_cfg["LOCATION_VIEW"],
                     mac_col=dc_cfg["COL_LOC_MAC"], nas_col=dc_cfg["COL_NAS_IP"])

@@ -12,6 +12,7 @@ urlpatterns = [
     path("device-search/", views.device_search, name="device_search"),
     path("device/<str:mac>/", views.device_360, name="device"),
     path("readiness/", views.policy_readiness, name="readiness"),
+    path("config/site-mapping/", views.config_sites, name="config_sites"),
     path("dataset/<slug:key>/", views.dataset_table, name="dataset"),
     path("dataset/<slug:key>.json", views.dataset_json, name="dataset_json"),
     path("dataset/<slug:key>/export.csv", views.dataset_csv, name="dataset_csv"),
