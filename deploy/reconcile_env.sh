@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 #
-# Reconcile .env.prod with the current app:
-#   * comment out variables whose name appears NOWHERE in the app's Python
-#     (i.e. the app no longer reads them - junk), prefixed "# [unused] "
-#   * add current/new variables that are missing (with safe defaults)
+# Reconcile + configure .env.prod:
+#   * comment out variables the app no longer reads (junk) as "# [unused] ..."
+#     - EXCEPT proxy vars (HTTP_PROXY/HTTPS_PROXY/NO_PROXY/...) and anything in
+#       KEEP_ALWAYS, which are system/infra settings and always preserved
+#   * set the current pipeline variables to their intended values (add if
+#     missing, update in place, uncomment if commented)
 #
-# Existing values are preserved; a timestamped backup is written first.
-# Idempotent - safe to run repeatedly.
+# Existing values for anything not in the SET list are preserved; secrets are
+# never overwritten. A timestamped backup is written first. Idempotent.
 #
 #   bash deploy/reconcile_env.sh                 # /opt/iotdash/.env.prod
 #   APP_DIR=/opt/iotdash bash deploy/reconcile_env.sh /path/to/.env.prod
@@ -19,23 +21,34 @@ ENV_FILE="${1:-$APP_DIR/.env.prod}"
 [ -f "$ENV_FILE" ] || { echo "ERROR: $ENV_FILE not found"; exit 1; }
 [ -d "$APP_DIR" ]  || { echo "ERROR: APP_DIR $APP_DIR not found"; exit 1; }
 
+# Names never commented even if absent from the app's Python (infra/system).
+KEEP_ALWAYS="DJANGO_SECRET_KEY EVENT_BACKEND"
+# ...and anything whose name matches this (case-insensitive) - proxy settings.
+KEEP_REGEX='PROXY'
+
 BACKUP="${ENV_FILE}.bak.$(date +%Y%m%d-%H%M%S)"
 cp -a "$ENV_FILE" "$BACKUP"
 echo "Backup written: $BACKUP"
 
-# 1) Every UPPER_CASE token that appears in the app's Python = a name the code
-#    may read. A var is "junk" only if its key appears nowhere here (safe: we
-#    never comment a variable the code references).
-USED_FILE="$(mktemp)"
+# 1) Names the app reads (any UPPER token in its Python) = not junk.
+USED="$(mktemp)"
 grep -rhoE '"[A-Z][A-Z0-9_]{2,}"' "$APP_DIR" --include='*.py' 2>/dev/null \
-  | tr -d '"' | sort -u > "$USED_FILE"
+  | tr -d '"' | sort -u > "$USED"
+for k in $KEEP_ALWAYS; do echo "$k"; done >> "$USED"
+sort -u -o "$USED" "$USED"
 
-# 2) Walk the file: comment out active vars whose key is not used anywhere.
+is_keep() {  # $1 = KEY -> keep (don't comment) if used or proxy
+  grep -qxF "$1" "$USED" && return 0
+  printf '%s' "$1" | grep -qiE "$KEEP_REGEX" && return 0
+  return 1
+}
+
+# 2) Comment out active vars that aren't kept.
 TMP="$(mktemp)"; commented=0
 while IFS= read -r line || [ -n "$line" ]; do
   if [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)= ]]; then
     key="${BASH_REMATCH[1]}"
-    if grep -qxF "$key" "$USED_FILE"; then
+    if is_keep "$key"; then
       printf '%s\n' "$line" >> "$TMP"
     else
       printf '# [unused] %s\n' "$line" >> "$TMP"
@@ -46,42 +59,46 @@ while IFS= read -r line || [ -n "$line" ]; do
     printf '%s\n' "$line" >> "$TMP"
   fi
 done < "$ENV_FILE"
+mv "$TMP" "$ENV_FILE"
+rm -f "$USED"
 
-# 3) Ensure current/new vars exist (skip if already present, active or commented).
-added=0
-add_var() {  # name  default  [comment]
-  local name="$1" def="$2" cmt="${3:-}"
-  if grep -qE "^[[:space:]]*#?[[:space:]]*${name}=" "$TMP"; then return; fi
-  [ -n "$cmt" ] && printf '# %s\n' "$cmt" >> "$TMP"
-  printf '%s=%s\n' "$name" "$def" >> "$TMP"
-  echo "  added: $name"
-  added=$((added + 1))
+# 3) set_var: add or update KEY=VALUE in place (uncomments a commented one).
+set_var() {  # $1 KEY  $2 VALUE
+  local k="$1" v="$2" found=0 t; t="$(mktemp)"
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ $found -eq 0 && "$line" =~ ^[[:space:]]*#?[[:space:]]*${k}= ]]; then
+      printf '%s=%s\n' "$k" "$v" >> "$t"; found=1
+    else
+      printf '%s\n' "$line" >> "$t"
+    fi
+  done < "$ENV_FILE"
+  [ $found -eq 0 ] && printf '%s=%s\n' "$k" "$v" >> "$t"
+  mv "$t" "$ENV_FILE"
+  echo "  set: $k=$v"
+}
+# add_if_missing: only add when absent (never overwrites an existing value).
+add_if_missing() {  # $1 KEY  $2 DEFAULT
+  grep -qE "^[[:space:]]*#?[[:space:]]*$1=" "$ENV_FILE" || set_var "$1" "$2"
 }
 
-printf '\n# ===== reconcile_env.sh additions (%s) =====\n' "$(date +%F)" >> "$TMP"
+echo "Applying current pipeline configuration:"
 
-# --- Admin Config page (⚙ Config) login ---
-add_var DASHBOARD_ADMIN_USER     admin "Config page login user"
-add_var DASHBOARD_ADMIN_PASSWORD ""    "Set to require login on the Config page; blank = open"
+# ---- IoT discovery by LOGICAL PROFILE (edit the names to your ISE) ----
+set_var ISE_DC_IOT_BY_LOGICAL      True
+set_var ISE_IOT_LOGICAL_PROFILES   "Wipro_CCTV,Wipro-BMS,Wipro-Access-Control"
+set_var ISE_DC_IOT_BY_AUTHZ        False
 
-# --- IoT discovery by AUTHORIZATION profile (RADIUS summary) ---
-add_var ISE_DC_IOT_BY_AUTHZ          False "Discover IoT by authz profile containing a token"
-add_var ISE_DC_AUTHZ_MATCH           IOT
-add_var ISE_DC_COL_AUTHZ             authorization_profiles
-add_var ISE_DC_AUTHZ_COL_PROFILE     endpoint_profile
-add_var ISE_DC_AUTHZ_COL_DEVICETYPE  device_type
-add_var ISE_DC_AUTHZ_COL_IP          "" "Blank: RADIUS summary has no endpoint IP (backfilled from endpoints_data)"
+# ---- Location from the LATEST RADIUS device_name ----
+set_var ISE_DC_LOCATION_BY_NAD_HOSTNAME True
+set_var ISE_DC_LOC_HOST_COL        device_name
+set_var ISE_DC_COL_LOC_TIME        timestamp
 
-# --- Location from NAD hostname (site-code map, editable on /config) ---
-add_var ISE_DC_LOCATION_BY_NAD_HOSTNAME False "Resolve site from NAD hostname"
-add_var ISE_DC_ND_VIEW      network_devices
-add_var ISE_DC_ND_NAME_COL  name
-add_var ISE_DC_ND_IP_COL    ip_mask
-add_var ISE_DC_COL_NAS_IP   nas_ip_address
+# ---- Admin Config page login (password never overwritten) ----
+add_if_missing DASHBOARD_ADMIN_USER     admin
+add_if_missing DASHBOARD_ADMIN_PASSWORD ""
 
-mv "$TMP" "$ENV_FILE"
-rm -f "$USED_FILE"
 echo
-echo "Done: commented $commented unused var(s), added $added new var(s)."
+echo "Done: commented $commented unused var(s); pipeline vars set."
 echo "Review $ENV_FILE   (backup: $BACKUP)."
-echo "Nothing is deleted - '# [unused]' lines are just commented; restore from backup if needed."
+echo "Proxy/NO_PROXY vars were preserved. Edit ISE_IOT_LOGICAL_PROFILES if your"
+echo "logical-profile names differ, and set DASHBOARD_ADMIN_PASSWORD to enable login."
