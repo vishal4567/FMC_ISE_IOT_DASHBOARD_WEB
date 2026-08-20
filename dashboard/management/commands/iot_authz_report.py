@@ -20,6 +20,8 @@ class Command(BaseCommand):
                             help="RADIUS view (default: DC LOCATION_VIEW)")
         parser.add_argument("--macs", type=int, default=0,
                             help="also list N sample MACs per profile")
+        parser.add_argument("--all", action="store_true",
+                            help="list ALL authz profiles (ignore --match) to compare")
 
     def handle(self, *args, **opts):
         from dashboard.services import get_dataconnect_client
@@ -30,15 +32,20 @@ class Command(BaseCommand):
         authz = dc_cfg["COL_AUTHZ"]
         mac = dc_cfg["COL_LOC_MAC"]
 
+        if opts["all"]:
+            where, binds, label = "", {}, "ALL profiles"
+        else:
+            where, binds, label = (f"WHERE UPPER({authz}) LIKE :m",
+                                   {"m": f"%{match}%"}, f"'{match}'")
+
         dc = get_dataconnect_client()
         _, rows = dc.query(
             f"SELECT {authz} AS authz, COUNT(DISTINCT {mac}) AS macs "
-            f"FROM {view} WHERE UPPER({authz}) LIKE :m "
-            f"GROUP BY {authz} ORDER BY macs DESC", {"m": f"%{match}%"})
+            f"FROM {view} {where} GROUP BY {authz} ORDER BY macs DESC", binds)
 
         if not rows:
             self.stdout.write(self.style.WARNING(
-                f"No authorization profiles matching '{match}' in {view}."))
+                f"No authorization profiles ({label}) in {view}."))
             return
 
         w = max([len("AUTHORIZATION PROFILE")]
@@ -54,12 +61,10 @@ class Command(BaseCommand):
         self.stdout.write(bar)
 
         _, uniq = dc.query(
-            f"SELECT COUNT(DISTINCT {mac}) AS n FROM {view} "
-            f"WHERE UPPER({authz}) LIKE :m", {"m": f"%{match}%"})
+            f"SELECT COUNT(DISTINCT {mac}) AS n FROM {view} {where}", binds)
         total_unique = int(uniq[0]["n"]) if uniq else 0
         self.stdout.write(self.style.SUCCESS(
-            f"{len(rows)} profile(s); {total_unique:,} unique MAC(s) "
-            f"across all '{match}' authz profiles."))
+            f"{len(rows)} profile(s); {total_unique:,} unique MAC(s) ({label})."))
 
         if opts["macs"]:
             self.stdout.write("")
