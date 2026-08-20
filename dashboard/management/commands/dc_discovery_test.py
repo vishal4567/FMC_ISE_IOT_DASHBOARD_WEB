@@ -34,21 +34,30 @@ class Command(BaseCommand):
         client = get_dataconnect_client()
         client.log = lambda m: (self.stdout.write(m), self.stdout.flush())
 
-        # ---- 1. discovery by authorization profile ----
-        self.stdout.write(self.style.MIGRATE_HEADING(
-            "== 1. IoT discovery by authorization profile =="))
+        # ---- 1. discovery ----
+        self.stdout.write(self.style.MIGRATE_HEADING("== 1. IoT discovery =="))
         try:
-            rows = client.iot_by_authz(
-                view=dc["LOCATION_VIEW"], mac_col=dc["COL_LOC_MAC"],
-                authz_col=dc["COL_AUTHZ"], match=dc["AUTHZ_MATCH"],
-                col_profile=dc["AUTHZ_COL_PROFILE"],
-                col_devicetype=dc["AUTHZ_COL_DEVICETYPE"],
-                col_ip=dc["AUTHZ_COL_IP"], col_site=dc["COL_LOC_SITE"],
-                limit=opts["limit"])
+            if dc.get("IOT_BY_LOGICAL"):
+                lps = settings.ISE["IOT_LOGICAL_PROFILES"]
+                self.stdout.write(f"  logical profiles: {lps}")
+                rows = client.iot_by_logical_profiles(
+                    lps, endpoints_view=dc["ENDPOINTS_VIEW"], mac_col=dc["COL_MAC"],
+                    profile_col=dc["COL_PROFILE"], ip_col=dc["COL_IP"],
+                    lp_view=dc["LP_VIEW"], lp_name_col=dc["LP_NAME_COL"],
+                    lp_policy_col=dc["LP_POLICY_COL"], limit=opts["limit"])
+            else:
+                rows = client.iot_by_authz(
+                    view=dc["LOCATION_VIEW"], mac_col=dc["COL_LOC_MAC"],
+                    authz_col=dc["COL_AUTHZ"], match=dc["AUTHZ_MATCH"],
+                    col_profile=dc["AUTHZ_COL_PROFILE"],
+                    col_devicetype=dc["AUTHZ_COL_DEVICETYPE"],
+                    col_ip=dc["AUTHZ_COL_IP"], col_site=dc["COL_LOC_SITE"],
+                    limit=opts["limit"])
         except Exception as exc:
-            self.stdout.write(self.style.ERROR(f"  iot_by_authz FAILED: {exc}"))
-            self.stdout.write("  -> fix ISE_DC_COL_AUTHZ / ISE_DC_AUTHZ_COL_* "
-                              "(blank a column that doesn't exist).")
+            self.stdout.write(self.style.ERROR(f"  discovery FAILED: {exc}"))
+            self.stdout.write("  -> if logical: check ISE_IOT_LOGICAL_PROFILES / "
+                              "ISE_DC_LP_*; if authz: ISE_DC_COL_AUTHZ / "
+                              "ISE_DC_AUTHZ_COL_* (blank a missing column).")
             return
         self.stdout.write(self.style.SUCCESS(f"  discovered {len(rows)} unique MACs"))
         if not rows:
@@ -100,7 +109,8 @@ class Command(BaseCommand):
             if dc.get("LOC_HOST_COL"):
                 loc = client.location_by_device_name(
                     macs, matcher=db_site_matcher(), view=dc["LOCATION_VIEW"],
-                    mac_col=dc["COL_LOC_MAC"], host_col=dc["LOC_HOST_COL"])
+                    mac_col=dc["COL_LOC_MAC"], host_col=dc["LOC_HOST_COL"],
+                    time_col=dc["COL_LOC_TIME"], days=dc["LOCATION_DAYS"])
             else:
                 loc = client.location_by_nad_hostname(
                     macs, matcher=db_site_matcher(), nd_view=dc["ND_VIEW"],

@@ -37,7 +37,8 @@ class Command(BaseCommand):
         if dc_cfg.get("LOC_HOST_COL"):
             loc = dc.location_by_device_name(
                 macs, matcher=db_site_matcher(), view=dc_cfg["LOCATION_VIEW"],
-                mac_col=dc_cfg["COL_LOC_MAC"], host_col=dc_cfg["LOC_HOST_COL"])
+                mac_col=dc_cfg["COL_LOC_MAC"], host_col=dc_cfg["LOC_HOST_COL"],
+                time_col=dc_cfg["COL_LOC_TIME"], days=dc_cfg["LOCATION_DAYS"])
         else:
             loc = dc.location_by_nad_hostname(
                 macs, matcher=db_site_matcher(), nd_view=dc_cfg["ND_VIEW"],

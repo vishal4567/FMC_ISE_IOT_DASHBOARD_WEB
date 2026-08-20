@@ -341,6 +341,13 @@ DATACONNECT = {
     # devices in code. SESSIONS_VIEW is the active-sessions source; SESSIONS_WHERE
     # optionally scopes to active records (e.g. on radius_accounting:
     # "acct_status_type <> 'Stop'"). SESSIONS_LIMIT caps the fetch (0 = all).
+    # IoT discovery by LOGICAL PROFILE: expand ISE_IOT_LOGICAL_PROFILES to their
+    # member profiling policies (logical_profiles.assigned_policies) and select
+    # those endpoints from endpoints_data (gives MAC + device_type + IP).
+    "IOT_BY_LOGICAL": _env_bool("ISE_DC_IOT_BY_LOGICAL", False),
+    "LP_VIEW": os.environ.get("ISE_DC_LP_VIEW", "logical_profiles"),
+    "LP_NAME_COL": os.environ.get("ISE_DC_LP_NAME_COL", "logical_profile"),
+    "LP_POLICY_COL": os.environ.get("ISE_DC_LP_POLICY_COL", "assigned_policies"),
     # Alternative IoT discovery: pull endpoints from the RADIUS summary whose
     # AUTHORIZATION profile name contains a token (default "IOT", any case),
     # instead of filtering endpoints_data by profiling policy.

@@ -343,6 +343,49 @@ class DataConnectClient:
         self._say(f"[dc] IoT-by-authz ('{match}'): {len(out)} unique MACs")
         return out
 
+    def iot_by_logical_profiles(self, logical_profiles, *,
+                                endpoints_view="endpoints_data",
+                                mac_col="mac_address",
+                                profile_col="endpoint_policy",
+                                ip_col="endpoint_ip",
+                                lp_view="logical_profiles",
+                                lp_name_col="logical_profile",
+                                lp_policy_col="assigned_policies", limit=0):
+        """Discover IoT endpoints that belong to the given LOGICAL PROFILES:
+        expand each logical profile to its member profiling policies
+        (``assigned_policies``) and select those endpoints from the endpoints
+        view. Returns mac + device_type (= endpoint_policy) + ip in the
+        iot_endpoints() shape; site is resolved separately from the NAD name."""
+        if not logical_profiles:
+            return []
+        binds = {f"l{i}": name for i, name in enumerate(logical_profiles)}
+        inlist = ", ".join(f":{k}" for k in binds)
+        select = [f"{mac_col} AS mac", f"MAX({profile_col}) AS profile"]
+        if ip_col:
+            select.append(f"MAX({ip_col}) AS ip")
+        sql = (f"SELECT {', '.join(select)} FROM {endpoints_view} "
+               f"WHERE {profile_col} IN (SELECT {lp_policy_col} FROM {lp_view} "
+               f"WHERE {lp_name_col} IN ({inlist})) GROUP BY {mac_col}")
+        if limit:
+            sql += f" FETCH FIRST {int(limit)} ROWS ONLY"
+        _, rows = self.query(sql, binds)
+        out = []
+        for r in rows:
+            mac = str(r.get("mac") or "").upper()
+            if not mac:
+                continue
+            out.append({
+                "mac": mac,
+                "endpoint_profile": r.get("profile", "") or "",
+                "logical_profile": "",
+                "device_type": r.get("profile", "") or "",
+                "ip": r.get("ip", "") or "",
+                "site": "",
+            })
+        self._say(f"[dc] logical-profile discovery "
+                  f"({len(logical_profiles)} LPs): {len(out)} endpoints")
+        return out
+
     def ip_by_mac(self, macs, *, view="endpoints_data", mac_col="mac_address",
                   ip_col="endpoint_ip"):
         """``{MAC: ip}`` from the endpoints view - used to backfill the device IP
@@ -503,25 +546,31 @@ class DataConnectClient:
     def location_by_device_name(self, macs, *, matcher=None,
                                 view="radius_authentication_summary",
                                 mac_col="calling_station_id",
-                                host_col="device_name"):
-        """``{MAC: site}`` when the RADIUS view carries the NAD hostname directly
-        (e.g. ``device_name`` = 'INPUN-PDC2-WLC-1.wipro.com'). ONE indexed query
-        per batch, no NETWORK_DEVICES join - the hostname is matched via the
-        site-code table."""
+                                host_col="device_name", time_col="", days=0):
+        """``{MAC: site}`` from the NAD hostname carried in the RADIUS view
+        (``device_name``), matched via the site-code table. The RADIUS log has
+        many rows per MAC, so when ``time_col`` is given we take the hostname
+        from the LATEST row per MAC (``MAX(host) KEEP DENSE_RANK LAST ORDER BY
+        time``); ``days`` optionally time-bounds the scan for partition pruning.
+        One indexed query per batch, no NETWORK_DEVICES join."""
         from integrations.location_map import build_matcher, site_from_hostname
 
         if matcher is None:
             matcher = build_matcher()
         want = [m.upper() for m in macs if m]
+        window = (f" AND {time_col} >= SYSTIMESTAMP - INTERVAL '{int(days)}' DAY"
+                  if days and time_col else "")
+        host_expr = (f"MAX({host_col}) KEEP (DENSE_RANK LAST ORDER BY {time_col})"
+                     if time_col else f"MAX({host_col})")
         out = {}
         with self.session():
             for i in range(0, len(want), 900):
                 chunk = want[i:i + 900]
                 binds = {f"m{j}": m for j, m in enumerate(chunk)}
                 inlist = ", ".join(f":{k}" for k in binds)
-                sql = (f"SELECT {mac_col} AS mac, MAX({host_col}) AS host "
+                sql = (f"SELECT {mac_col} AS mac, {host_expr} AS host "
                        f"FROM {view} WHERE {mac_col} IN ({inlist}) "
-                       f"AND {host_col} IS NOT NULL GROUP BY {mac_col}")
+                       f"AND {host_col} IS NOT NULL{window} GROUP BY {mac_col}")
                 try:
                     _, rows = self.query(sql, binds)
                 except DataConnectError:

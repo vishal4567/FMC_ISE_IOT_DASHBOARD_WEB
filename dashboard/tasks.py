@@ -170,7 +170,17 @@ def sync_iot_endpoints(log=None) -> dict:
         try:
             dc = services.get_dataconnect_client()
             dc.log = say            # per-SQL progress in the sync log
-            if dc_cfg.get("IOT_BY_AUTHZ"):
+            if dc_cfg.get("IOT_BY_LOGICAL"):
+                lps = cfg["IOT_LOGICAL_PROFILES"]
+                say(f"[sync] discovering via Data Connect: logical profiles "
+                    f"{lps} -> assigned policies -> {dc_cfg['ENDPOINTS_VIEW']}...")
+                base_rows = dc.iot_by_logical_profiles(
+                    lps, endpoints_view=dc_cfg["ENDPOINTS_VIEW"],
+                    mac_col=dc_cfg["COL_MAC"], profile_col=dc_cfg["COL_PROFILE"],
+                    ip_col=dc_cfg["COL_IP"], lp_view=dc_cfg["LP_VIEW"],
+                    lp_name_col=dc_cfg["LP_NAME_COL"],
+                    lp_policy_col=dc_cfg["LP_POLICY_COL"])
+            elif dc_cfg.get("IOT_BY_AUTHZ"):
                 say(f"[sync] discovering via Data Connect: authorization profile "
                     f"contains '{dc_cfg['AUTHZ_MATCH']}' "
                     f"(view {dc_cfg['LOCATION_VIEW']})...")
@@ -267,11 +277,13 @@ def sync_iot_endpoints(log=None) -> dict:
             if by_nad:
                 from dashboard.site_mapping import db_site_matcher
                 if dc_cfg.get("LOC_HOST_COL"):
-                    # NAD hostname is in the RADIUS view directly (device_name)
+                    # NAD hostname is in the RADIUS view directly (device_name);
+                    # take the LATEST row per MAC via COL_LOC_TIME.
                     dc_loc = dc.location_by_device_name(
                         macs, matcher=db_site_matcher(),
                         view=dc_cfg["LOCATION_VIEW"], mac_col=dc_cfg["COL_LOC_MAC"],
-                        host_col=dc_cfg["LOC_HOST_COL"])
+                        host_col=dc_cfg["LOC_HOST_COL"],
+                        time_col=dc_cfg["COL_LOC_TIME"], days=dc_cfg["LOCATION_DAYS"])
                 else:
                     dc_loc = dc.location_by_nad_hostname(
                         macs, matcher=db_site_matcher(), nd_view=dc_cfg["ND_VIEW"],
