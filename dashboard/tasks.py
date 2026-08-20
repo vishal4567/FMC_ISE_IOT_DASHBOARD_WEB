@@ -258,11 +258,18 @@ def sync_iot_endpoints(log=None) -> dict:
         try:
             if by_nad:
                 from dashboard.site_mapping import db_site_matcher
-                dc_loc = dc.location_by_nad_hostname(
-                    macs, matcher=db_site_matcher(), nd_view=dc_cfg["ND_VIEW"],
-                    nd_name_col=dc_cfg["ND_NAME_COL"], nd_ip_col=dc_cfg["ND_IP_COL"],
-                    radius_view=dc_cfg["LOCATION_VIEW"],
-                    mac_col=dc_cfg["COL_LOC_MAC"], nas_col=dc_cfg["COL_NAS_IP"])
+                if dc_cfg.get("LOC_HOST_COL"):
+                    # NAD hostname is in the RADIUS view directly (device_name)
+                    dc_loc = dc.location_by_device_name(
+                        macs, matcher=db_site_matcher(),
+                        view=dc_cfg["LOCATION_VIEW"], mac_col=dc_cfg["COL_LOC_MAC"],
+                        host_col=dc_cfg["LOC_HOST_COL"])
+                else:
+                    dc_loc = dc.location_by_nad_hostname(
+                        macs, matcher=db_site_matcher(), nd_view=dc_cfg["ND_VIEW"],
+                        nd_name_col=dc_cfg["ND_NAME_COL"], nd_ip_col=dc_cfg["ND_IP_COL"],
+                        radius_view=dc_cfg["LOCATION_VIEW"],
+                        mac_col=dc_cfg["COL_LOC_MAC"], nas_col=dc_cfg["COL_NAS_IP"])
             else:
                 dc_loc = dc.location_by_mac(
                     macs, view=dc_cfg["LOCATION_VIEW"],

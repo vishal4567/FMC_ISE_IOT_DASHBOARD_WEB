@@ -34,11 +34,16 @@ class Command(BaseCommand):
         self.stdout.write(f"Resolving site via NAD hostname for {len(macs)} devices...")
         dc = get_dataconnect_client()
         dc.log = lambda m: (self.stdout.write(m), self.stdout.flush())
-        loc = dc.location_by_nad_hostname(
-            macs, matcher=db_site_matcher(), nd_view=dc_cfg["ND_VIEW"],
-            nd_name_col=dc_cfg["ND_NAME_COL"], nd_ip_col=dc_cfg["ND_IP_COL"],
-            radius_view=dc_cfg["LOCATION_VIEW"], mac_col=dc_cfg["COL_LOC_MAC"],
-            nas_col=dc_cfg["COL_NAS_IP"])
+        if dc_cfg.get("LOC_HOST_COL"):
+            loc = dc.location_by_device_name(
+                macs, matcher=db_site_matcher(), view=dc_cfg["LOCATION_VIEW"],
+                mac_col=dc_cfg["COL_LOC_MAC"], host_col=dc_cfg["LOC_HOST_COL"])
+        else:
+            loc = dc.location_by_nad_hostname(
+                macs, matcher=db_site_matcher(), nd_view=dc_cfg["ND_VIEW"],
+                nd_name_col=dc_cfg["ND_NAME_COL"], nd_ip_col=dc_cfg["ND_IP_COL"],
+                radius_view=dc_cfg["LOCATION_VIEW"], mac_col=dc_cfg["COL_LOC_MAC"],
+                nas_col=dc_cfg["COL_NAS_IP"])
 
         updated = []
         for d in IoTDevice.objects.all():

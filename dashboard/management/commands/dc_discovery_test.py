@@ -89,11 +89,16 @@ class Command(BaseCommand):
             "== 2. Location by NAD hostname =="))
         macs = [r["mac"] for r in rows]
         try:
-            loc = client.location_by_nad_hostname(
-                macs, matcher=db_site_matcher(), nd_view=dc["ND_VIEW"],
-                nd_name_col=dc["ND_NAME_COL"], nd_ip_col=dc["ND_IP_COL"],
-                radius_view=dc["LOCATION_VIEW"], mac_col=dc["COL_LOC_MAC"],
-                nas_col=dc["COL_NAS_IP"])
+            if dc.get("LOC_HOST_COL"):
+                loc = client.location_by_device_name(
+                    macs, matcher=db_site_matcher(), view=dc["LOCATION_VIEW"],
+                    mac_col=dc["COL_LOC_MAC"], host_col=dc["LOC_HOST_COL"])
+            else:
+                loc = client.location_by_nad_hostname(
+                    macs, matcher=db_site_matcher(), nd_view=dc["ND_VIEW"],
+                    nd_name_col=dc["ND_NAME_COL"], nd_ip_col=dc["ND_IP_COL"],
+                    radius_view=dc["LOCATION_VIEW"], mac_col=dc["COL_LOC_MAC"],
+                    nas_col=dc["COL_NAS_IP"])
         except Exception as exc:
             self.stdout.write(self.style.ERROR(
                 f"  location_by_nad_hostname FAILED: {exc}"))

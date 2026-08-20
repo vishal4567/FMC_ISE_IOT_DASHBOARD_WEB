@@ -467,3 +467,37 @@ class DataConnectClient:
         matched = sum(1 for v in out.values() if v)
         self._say(f"[dc] NAD-hostname location: {matched}/{len(out)} macs -> site")
         return out
+
+    def location_by_device_name(self, macs, *, matcher=None,
+                                view="radius_authentication_summary",
+                                mac_col="calling_station_id",
+                                host_col="device_name"):
+        """``{MAC: site}`` when the RADIUS view carries the NAD hostname directly
+        (e.g. ``device_name`` = 'INPUN-PDC2-WLC-1.wipro.com'). ONE indexed query
+        per batch, no NETWORK_DEVICES join - the hostname is matched via the
+        site-code table."""
+        from integrations.location_map import build_matcher, site_from_hostname
+
+        if matcher is None:
+            matcher = build_matcher()
+        want = [m.upper() for m in macs if m]
+        out = {}
+        with self.session():
+            for i in range(0, len(want), 900):
+                chunk = want[i:i + 900]
+                binds = {f"m{j}": m for j, m in enumerate(chunk)}
+                inlist = ", ".join(f":{k}" for k in binds)
+                sql = (f"SELECT {mac_col} AS mac, MAX({host_col}) AS host "
+                       f"FROM {view} WHERE {mac_col} IN ({inlist}) "
+                       f"AND {host_col} IS NOT NULL GROUP BY {mac_col}")
+                try:
+                    _, rows = self.query(sql, binds)
+                except DataConnectError:
+                    continue
+                for r in rows:
+                    if r.get("mac"):
+                        out[str(r["mac"]).upper()] = site_from_hostname(
+                            r.get("host", ""), matcher)
+        matched = sum(1 for v in out.values() if v)
+        self._say(f"[dc] device_name location: {matched}/{len(out)} macs -> site")
+        return out

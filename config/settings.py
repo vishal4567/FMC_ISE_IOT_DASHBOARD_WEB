@@ -329,6 +329,10 @@ DATACONNECT = {
     # (hostname) -> site. Confirm the NETWORK_DEVICES columns first with
     #   manage.py probe_dataconnect --one network_devices
     "LOCATION_BY_NAD_HOSTNAME": _env_bool("ISE_DC_LOCATION_BY_NAD_HOSTNAME", False),
+    # If the RADIUS view carries the NAD hostname directly (it does:
+    # device_name = 'INPUN-PDC2-WLC-1...'), resolve site from THAT column in one
+    # query - no NETWORK_DEVICES join. Blank it to fall back to the nas_ip join.
+    "LOC_HOST_COL": os.environ.get("ISE_DC_LOC_HOST_COL", "device_name"),
     "ND_VIEW": os.environ.get("ISE_DC_ND_VIEW", "network_devices"),
     "ND_NAME_COL": os.environ.get("ISE_DC_ND_NAME_COL", "name"),
     "ND_IP_COL": os.environ.get("ISE_DC_ND_IP_COL", "ip_mask"),
