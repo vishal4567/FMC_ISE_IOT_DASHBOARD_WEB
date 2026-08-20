@@ -337,6 +337,15 @@ DATACONNECT = {
     # devices in code. SESSIONS_VIEW is the active-sessions source; SESSIONS_WHERE
     # optionally scopes to active records (e.g. on radius_accounting:
     # "acct_status_type <> 'Stop'"). SESSIONS_LIMIT caps the fetch (0 = all).
+    # Alternative IoT discovery: pull endpoints from the RADIUS summary whose
+    # AUTHORIZATION profile name contains a token (default "IOT", any case),
+    # instead of filtering endpoints_data by profiling policy.
+    "IOT_BY_AUTHZ": _env_bool("ISE_DC_IOT_BY_AUTHZ", False),
+    "COL_AUTHZ": os.environ.get("ISE_DC_COL_AUTHZ", "authorization_profiles"),
+    "AUTHZ_MATCH": os.environ.get("ISE_DC_AUTHZ_MATCH", "IOT"),
+    "AUTHZ_COL_PROFILE": os.environ.get("ISE_DC_AUTHZ_COL_PROFILE", "endpoint_profile"),
+    "AUTHZ_COL_DEVICETYPE": os.environ.get("ISE_DC_AUTHZ_COL_DEVICETYPE", "device_type"),
+    "AUTHZ_COL_IP": os.environ.get("ISE_DC_AUTHZ_COL_IP", "framed_ip_address"),
     "SESSIONS_VIEW": os.environ.get("ISE_DC_SESSIONS_VIEW", "radius_authentication_summary"),
     "SESSIONS_WHERE": os.environ.get("ISE_DC_SESSIONS_WHERE", ""),
     "SESSIONS_LIMIT": _env_int("ISE_DC_SESSIONS_LIMIT", 0),

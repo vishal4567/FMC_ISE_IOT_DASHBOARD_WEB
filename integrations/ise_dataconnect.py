@@ -304,6 +304,45 @@ class DataConnectClient:
             })
         return out
 
+    def iot_by_authz(self, *, view="radius_authentication_summary",
+                     mac_col="calling_station_id",
+                     authz_col="authorization_profiles", match="IOT",
+                     col_profile="endpoint_profile", col_devicetype="device_type",
+                     col_ip="framed_ip_address", col_site="location", limit=0):
+        """Discover IoT endpoints from the RADIUS summary where the AUTHORIZATION
+        profile name contains ``match`` (case-insensitive). One row per MAC, in
+        the same shape as iot_endpoints() so it feeds the same sync pipeline."""
+        select = [f"{mac_col} AS mac", f"MAX({authz_col}) AS authz"]
+        if col_profile:
+            select.append(f"MAX({col_profile}) AS profile")
+        if col_devicetype:
+            select.append(f"MAX({col_devicetype}) AS device_type")
+        if col_ip:
+            select.append(f"MAX({col_ip}) AS ip")
+        if col_site:
+            select.append(f"MAX({col_site}) AS site")
+        sql = (f"SELECT {', '.join(select)} FROM {view} "
+               f"WHERE UPPER({authz_col}) LIKE :m GROUP BY {mac_col}")
+        if limit:
+            sql += f" FETCH FIRST {int(limit)} ROWS ONLY"
+        _, rows = self.query(sql, {"m": f"%{match.upper()}%"})
+        out = []
+        for r in rows:
+            mac = str(r.get("mac") or "").upper()
+            if not mac:
+                continue
+            out.append({
+                "mac": mac,
+                "endpoint_profile": r.get("profile", "") or "",
+                "logical_profile": "",
+                "device_type": r.get("device_type", "") or r.get("profile", "") or "",
+                "ip": r.get("ip", "") or "",
+                "site": _loc_leaf(r.get("site", "")),
+                "authz_profile": r.get("authz", "") or "",
+            })
+        self._say(f"[dc] IoT-by-authz ('{match}'): {len(out)} unique MACs")
+        return out
+
     def location_by_mac(self, macs, *, view="radius_authentications",
                         mac_col="calling_station_id", loc_col="location",
                         days=0, time_col="timestamp"):

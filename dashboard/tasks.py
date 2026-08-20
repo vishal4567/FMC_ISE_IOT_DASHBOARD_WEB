@@ -167,17 +167,28 @@ def sync_iot_endpoints(log=None) -> dict:
     # 1. Discover IoT endpoints. Data Connect (SQL, best at scale) if enabled;
     #    else Open API (deviceType inline) or ERS (group/logical/profileId filter).
     if dc_mode:
-        names = list(profile_map.values()) or cfg["IOT_PROFILES"]
-        say(f"[sync] discovering via ISE Data Connect SQL "
-            f"(view {dc_cfg['ENDPOINTS_VIEW']}, {len(names)} profiles)...")
         try:
             dc = services.get_dataconnect_client()
             dc.log = say            # per-SQL progress in the sync log
-            base_rows = dc.iot_endpoints(
-                names, view=dc_cfg["ENDPOINTS_VIEW"], col_mac=dc_cfg["COL_MAC"],
-                col_profile=dc_cfg["COL_PROFILE"], col_group=dc_cfg["COL_GROUP"],
-                col_devicetype=dc_cfg["COL_DEVICETYPE"], col_ip=dc_cfg["COL_IP"],
-                col_site=dc_cfg["COL_SITE"])
+            if dc_cfg.get("IOT_BY_AUTHZ"):
+                say(f"[sync] discovering via Data Connect: authorization profile "
+                    f"contains '{dc_cfg['AUTHZ_MATCH']}' "
+                    f"(view {dc_cfg['LOCATION_VIEW']})...")
+                base_rows = dc.iot_by_authz(
+                    view=dc_cfg["LOCATION_VIEW"], mac_col=dc_cfg["COL_LOC_MAC"],
+                    authz_col=dc_cfg["COL_AUTHZ"], match=dc_cfg["AUTHZ_MATCH"],
+                    col_profile=dc_cfg["AUTHZ_COL_PROFILE"],
+                    col_devicetype=dc_cfg["AUTHZ_COL_DEVICETYPE"],
+                    col_ip=dc_cfg["AUTHZ_COL_IP"], col_site=dc_cfg["COL_LOC_SITE"])
+            else:
+                names = list(profile_map.values()) or cfg["IOT_PROFILES"]
+                say(f"[sync] discovering via ISE Data Connect SQL "
+                    f"(view {dc_cfg['ENDPOINTS_VIEW']}, {len(names)} profiles)...")
+                base_rows = dc.iot_endpoints(
+                    names, view=dc_cfg["ENDPOINTS_VIEW"], col_mac=dc_cfg["COL_MAC"],
+                    col_profile=dc_cfg["COL_PROFILE"], col_group=dc_cfg["COL_GROUP"],
+                    col_devicetype=dc_cfg["COL_DEVICETYPE"], col_ip=dc_cfg["COL_IP"],
+                    col_site=dc_cfg["COL_SITE"])
         except Exception as exc:
             return {"error": f"Data Connect discovery failed: {exc}"}
         say(f"[sync] Data Connect returned {len(base_rows)} IoT endpoints")
