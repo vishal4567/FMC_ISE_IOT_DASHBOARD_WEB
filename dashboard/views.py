@@ -7,6 +7,7 @@ from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 
 from . import services
+from .adminauth import admin_required
 
 
 def index(request):
@@ -268,6 +269,7 @@ def _stringify(value):
     return value
 
 
+@admin_required
 def config_sites(request):
     """In-app admin config: manage the NAD-hostname -> site mapping (SiteCode).
     Add / edit / delete / enable rows, and test a hostname against the map."""

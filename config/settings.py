@@ -344,6 +344,13 @@ DATACONNECT = {
 }
 
 # ---------------------------------------------------------------------------
+# Admin Config page auth (HTTP Basic). Protection is active only when
+# DASHBOARD_ADMIN_PASSWORD is set; blank = open (see dashboard/adminauth.py).
+# ---------------------------------------------------------------------------
+ADMIN_USER = os.environ.get("DASHBOARD_ADMIN_USER", "admin")
+ADMIN_PASSWORD = os.environ.get("DASHBOARD_ADMIN_PASSWORD", "")
+
+# ---------------------------------------------------------------------------
 # Cisco FMC configuration
 # ---------------------------------------------------------------------------
 FMC = {
