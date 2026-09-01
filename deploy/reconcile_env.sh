@@ -83,9 +83,11 @@ add_if_missing() {  # $1 KEY  $2 DEFAULT
 
 echo "Applying current pipeline configuration:"
 
-# ---- IoT discovery by LOGICAL PROFILE (edit the names to your ISE) ----
+# ---- IoT discovery by LOGICAL PROFILE (union: named list + IOT-in-name) ----
 set_var ISE_DC_IOT_BY_LOGICAL      True
 set_var ISE_IOT_LOGICAL_PROFILES   "Wipro_CCTV,Wipro-BMS,Wipro-Access-Control"
+set_var ISE_DC_LOGICAL_MATCH       IOT
+set_var ISE_ADDITIVE_SYNC          True
 set_var ISE_DC_IOT_BY_AUTHZ        False
 
 # ---- Location from the LATEST RADIUS device_name ----
