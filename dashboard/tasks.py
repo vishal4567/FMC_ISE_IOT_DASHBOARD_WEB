@@ -173,9 +173,9 @@ def sync_iot_endpoints(log=None) -> dict:
             if dc_cfg.get("IOT_BY_LOGICAL"):
                 lpm = dc_cfg["LOGICAL_MATCH"]
                 lps = cfg["IOT_LOGICAL_PROFILES"]
+                _scope = f"{lps}" + (f" + name~'{lpm}'" if lpm else "")
                 say(f"[sync] discovering via Data Connect: logical profiles "
-                    f"{'~ ' + lpm if lpm else lps} -> assigned policies "
-                    f"-> {dc_cfg['ENDPOINTS_VIEW']}...")
+                    f"{_scope} -> assigned policies -> {dc_cfg['ENDPOINTS_VIEW']}...")
                 base_rows = dc.iot_by_logical_profiles(
                     lps, match=lpm, endpoints_view=dc_cfg["ENDPOINTS_VIEW"],
                     mac_col=dc_cfg["COL_MAC"], profile_col=dc_cfg["COL_PROFILE"],

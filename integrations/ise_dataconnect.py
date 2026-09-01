@@ -351,20 +351,25 @@ class DataConnectClient:
                                 lp_view="logical_profiles",
                                 lp_name_col="logical_profile",
                                 lp_policy_col="assigned_policies", limit=0):
-        """Discover IoT endpoints that belong to LOGICAL PROFILES - either an
-        explicit ``logical_profiles`` list, or ALL whose name contains ``match``
-        (e.g. 'IOT', case-insensitive). Expands them to member profiling
-        policies (``assigned_policies``) and selects those endpoints. Returns
-        mac + device_type (= endpoint_policy) + ip in the iot_endpoints() shape;
-        site is resolved separately from the NAD name."""
+        """Discover IoT endpoints that belong to LOGICAL PROFILES - the explicit
+        ``logical_profiles`` list AND/OR ALL whose name contains ``match`` (e.g.
+        'IOT', case-insensitive), combined (union). Expands them to member
+        profiling policies (``assigned_policies``) and selects those endpoints.
+        Returns mac + device_type (= endpoint_policy) + ip in the
+        iot_endpoints() shape; site is resolved separately from the NAD name."""
+        binds, conds = {}, []
+        if logical_profiles:
+            lkeys = []
+            for i, name in enumerate(logical_profiles):
+                binds[f"l{i}"] = name
+                lkeys.append(f":l{i}")
+            conds.append(f"{lp_name_col} IN ({', '.join(lkeys)})")
         if match:
-            lp_where = f"UPPER({lp_name_col}) LIKE :lpm"
-            binds = {"lpm": f"%{match.upper()}%"}
-        elif logical_profiles:
-            binds = {f"l{i}": name for i, name in enumerate(logical_profiles)}
-            lp_where = f"{lp_name_col} IN ({', '.join(f':{k}' for k in binds)})"
-        else:
+            binds["lpm"] = f"%{match.upper()}%"
+            conds.append(f"UPPER({lp_name_col}) LIKE :lpm")
+        if not conds:
             return []
+        lp_where = "(" + " OR ".join(conds) + ")"
         select = [f"{mac_col} AS mac", f"MAX({profile_col}) AS profile"]
         if ip_col:
             select.append(f"MAX({ip_col}) AS ip")
@@ -387,8 +392,13 @@ class DataConnectClient:
                 "ip": r.get("ip", "") or "",
                 "site": "",
             })
-        scope = f"match '{match}'" if match else f"{len(logical_profiles)} LPs"
-        self._say(f"[dc] logical-profile discovery ({scope}): {len(out)} endpoints")
+        scope = []
+        if logical_profiles:
+            scope.append(f"{len(logical_profiles)} named")
+        if match:
+            scope.append(f"~'{match}'")
+        self._say(f"[dc] logical-profile discovery ({' + '.join(scope)}): "
+                  f"{len(out)} endpoints")
         return out
 
     def ip_by_mac(self, macs, *, view="endpoints_data", mac_col="mac_address",

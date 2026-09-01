@@ -40,7 +40,8 @@ class Command(BaseCommand):
             if dc.get("IOT_BY_LOGICAL"):
                 lpm = dc["LOGICAL_MATCH"]
                 lps = settings.ISE["IOT_LOGICAL_PROFILES"]
-                self.stdout.write(f"  logical: {'~ ' + lpm if lpm else lps}")
+                self.stdout.write(f"  logical: {lps}" +
+                                  (f" + name~'{lpm}'" if lpm else ""))
                 rows = client.iot_by_logical_profiles(
                     lps, match=lpm, endpoints_view=dc["ENDPOINTS_VIEW"],
                     mac_col=dc["COL_MAC"], profile_col=dc["COL_PROFILE"],
