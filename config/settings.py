@@ -277,6 +277,9 @@ ISE = {
     "DEVICE_TYPE_ATTR": os.environ.get("ISE_DEVICE_TYPE_ATTR", "Device Type"),
     # Parallelism for per-endpoint detail / session lookups.
     "SYNC_WORKERS": _env_int("ISE_SYNC_WORKERS", 8),
+    # Additive sync: only ADD newly-discovered devices; existing IoTDevice rows
+    # are kept untouched (not re-enriched, not overwritten, never deleted).
+    "ADDITIVE_SYNC": _env_bool("ISE_ADDITIVE_SYNC", True),
 }
 
 # ---------------------------------------------------------------------------
@@ -345,6 +348,10 @@ DATACONNECT = {
     # member profiling policies (logical_profiles.assigned_policies) and select
     # those endpoints from endpoints_data (gives MAC + device_type + IP).
     "IOT_BY_LOGICAL": _env_bool("ISE_DC_IOT_BY_LOGICAL", False),
+    # Match ALL logical profiles whose name contains this token (e.g. "IOT",
+    # any case). Overrides the explicit ISE_IOT_LOGICAL_PROFILES list. Blank =
+    # use the explicit list.
+    "LOGICAL_MATCH": os.environ.get("ISE_DC_LOGICAL_MATCH", ""),
     "LP_VIEW": os.environ.get("ISE_DC_LP_VIEW", "logical_profiles"),
     "LP_NAME_COL": os.environ.get("ISE_DC_LP_NAME_COL", "logical_profile"),
     "LP_POLICY_COL": os.environ.get("ISE_DC_LP_POLICY_COL", "assigned_policies"),

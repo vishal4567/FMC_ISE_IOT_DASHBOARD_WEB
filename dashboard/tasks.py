@@ -171,11 +171,13 @@ def sync_iot_endpoints(log=None) -> dict:
             dc = services.get_dataconnect_client()
             dc.log = say            # per-SQL progress in the sync log
             if dc_cfg.get("IOT_BY_LOGICAL"):
+                lpm = dc_cfg["LOGICAL_MATCH"]
                 lps = cfg["IOT_LOGICAL_PROFILES"]
                 say(f"[sync] discovering via Data Connect: logical profiles "
-                    f"{lps} -> assigned policies -> {dc_cfg['ENDPOINTS_VIEW']}...")
+                    f"{'~ ' + lpm if lpm else lps} -> assigned policies "
+                    f"-> {dc_cfg['ENDPOINTS_VIEW']}...")
                 base_rows = dc.iot_by_logical_profiles(
-                    lps, endpoints_view=dc_cfg["ENDPOINTS_VIEW"],
+                    lps, match=lpm, endpoints_view=dc_cfg["ENDPOINTS_VIEW"],
                     mac_col=dc_cfg["COL_MAC"], profile_col=dc_cfg["COL_PROFILE"],
                     ip_col=dc_cfg["COL_IP"], lp_view=dc_cfg["LP_VIEW"],
                     lp_name_col=dc_cfg["LP_NAME_COL"],
@@ -204,6 +206,18 @@ def sync_iot_endpoints(log=None) -> dict:
         say(f"[sync] Data Connect returned {len(base_rows)} IoT endpoints")
         if not base_rows:
             return {"iot_endpoints": 0, "note": "Data Connect returned no IoT endpoints"}
+
+        # Additive: only process NEWLY-discovered devices; existing IoTDevice
+        # rows are kept untouched (not re-enriched, not overwritten, not deleted).
+        if cfg["ADDITIVE_SYNC"]:
+            existing = set(IoTDevice.objects.values_list("mac", flat=True))
+            before = len(base_rows)
+            base_rows = [r for r in base_rows if r["mac"] not in existing]
+            say(f"[sync] additive: {before - len(base_rows)} already present, "
+                f"{len(base_rows)} new to add (kept {len(existing)} existing)")
+            if not base_rows:
+                return {"iot_endpoints": 0, "added": 0,
+                        "existing": len(existing), "note": "additive: no new devices"}
 
         # Backfill endpoint IP + device type (profiling policy) from
         # endpoints_data when the discovery source (e.g. RADIUS summary) lacks
@@ -305,6 +319,26 @@ def sync_iot_endpoints(log=None) -> dict:
                     r["site"] = site
         except Exception as exc:
             say(f"[sync] Data Connect location query failed: {exc}")
+
+        # ISE location BACKUP: for devices the NAD-hostname method couldn't
+        # resolve, fall back to the ISE RADIUS location hierarchy (leaf).
+        if by_nad:
+            unresolved = [r["mac"] for r in base_rows if not r.get("site")]
+            if unresolved:
+                try:
+                    backup = dc.location_by_mac(
+                        unresolved, view=dc_cfg["LOCATION_VIEW"],
+                        mac_col=dc_cfg["COL_LOC_MAC"], loc_col=dc_cfg["COL_LOC_SITE"],
+                        days=dc_cfg["LOCATION_DAYS"], time_col=dc_cfg["COL_LOC_TIME"])
+                    filled = 0
+                    for r in base_rows:
+                        if not r.get("site") and backup.get(r["mac"]):
+                            r["site"] = backup[r["mac"]]
+                            filled += 1
+                    say(f"[sync] ISE location backup filled {filled}/{len(unresolved)}"
+                        f" unresolved devices")
+                except Exception as exc:
+                    say(f"[sync] ISE location backup failed: {exc}")
 
     # 2. Per-endpoint: (ERS-path) enrich detail; optional ERS device-type
     #    backfill; resolve site. Parallelised.

@@ -280,6 +280,24 @@ def ise_device_count(site=None):
     return _iot_qs(site).count()
 
 
+def compliance(hours=None, site=None, device_type=None):
+    """Compliance = devices NOT at risk. A device is compliant when it has no
+    threat events in the window. score = (total - at_risk) / total * 100, over
+    the ISE onboarded inventory (site/type-aware)."""
+    qs = _iot_qs(site)
+    if device_type and device_type != SITES_ALL:
+        qs = qs.filter(device_type=device_type)
+    total = qs.count()
+    at_risk = min(summary(hours, site, device_type)["devices_at_risk"], total)
+    compliant = max(0, total - at_risk)
+    return {
+        "total": total,
+        "at_risk": at_risk,
+        "compliant": compliant,
+        "score": round(100 * compliant / total) if total else 100,
+    }
+
+
 def ise_type_counts(site=None):
     """Onboarded IoT-device count per device type, from the ISE inventory
     (IoTDevice), honoring Site — the authoritative 'how many of this type exist',

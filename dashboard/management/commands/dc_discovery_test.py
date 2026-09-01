@@ -38,13 +38,15 @@ class Command(BaseCommand):
         self.stdout.write(self.style.MIGRATE_HEADING("== 1. IoT discovery =="))
         try:
             if dc.get("IOT_BY_LOGICAL"):
+                lpm = dc["LOGICAL_MATCH"]
                 lps = settings.ISE["IOT_LOGICAL_PROFILES"]
-                self.stdout.write(f"  logical profiles: {lps}")
+                self.stdout.write(f"  logical: {'~ ' + lpm if lpm else lps}")
                 rows = client.iot_by_logical_profiles(
-                    lps, endpoints_view=dc["ENDPOINTS_VIEW"], mac_col=dc["COL_MAC"],
-                    profile_col=dc["COL_PROFILE"], ip_col=dc["COL_IP"],
-                    lp_view=dc["LP_VIEW"], lp_name_col=dc["LP_NAME_COL"],
-                    lp_policy_col=dc["LP_POLICY_COL"], limit=opts["limit"])
+                    lps, match=lpm, endpoints_view=dc["ENDPOINTS_VIEW"],
+                    mac_col=dc["COL_MAC"], profile_col=dc["COL_PROFILE"],
+                    ip_col=dc["COL_IP"], lp_view=dc["LP_VIEW"],
+                    lp_name_col=dc["LP_NAME_COL"], lp_policy_col=dc["LP_POLICY_COL"],
+                    limit=opts["limit"])
             else:
                 rows = client.iot_by_authz(
                     view=dc["LOCATION_VIEW"], mac_col=dc["COL_LOC_MAC"],

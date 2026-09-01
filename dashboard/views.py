@@ -42,6 +42,7 @@ def index(request):
     leaderboard = analytics.by_device_type(hours=hours, site=site)
     corr = analytics.correlation_summary()
     sum_all = analytics.summary(hours=hours, site=site)  # counts in one query
+    compliance = analytics.compliance(hours=hours, site=site)
 
     # "Devices" = ISE onboarded inventory for the type (not FMC-seen MACs). Keep
     # the FMC-active count too, for context.
@@ -62,13 +63,16 @@ def index(request):
     sum_type = (analytics.summary(hours=hours, site=site, device_type=selected)
                 if selected else {})
 
+    _t_dev = ise_counts.get(selected, 0)
+    _t_risk = min(sum_type.get("devices_at_risk", 0), _t_dev)
     type_metrics = {
-        "devices": ise_counts.get(selected, 0),
+        "devices": _t_dev,
         "at_risk": sum_type.get("devices_at_risk", 0),
         "threats": t_row["threats"] if t_row else 0,
         "critical": t_row["critical"] if t_row else 0,
         "traffic_mb": t_row["traffic_mb"] if t_row else 0,
         "pct_blocked": t_row["pct_blocked"] if t_row else 0,
+        "compliance": round(100 * (_t_dev - _t_risk) / _t_dev) if _t_dev else 100,
     }
 
     context = {
@@ -88,6 +92,7 @@ def index(request):
             "critical": sum_all["critical"],
         },
         "correlation": corr,
+        "compliance": compliance,
         "leaderboard": leaderboard,
         "severity_json": json.dumps(severity_all),
         "trend_json": json.dumps(trend_all["points"]),
