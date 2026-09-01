@@ -38,7 +38,7 @@
 
 <div class="row g-3 mb-2">
   <div class="col-6 col-lg">
-    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}">
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W1 · Total IoT Devices</div>
         <div class="display-5 fw-bold text-primary">{{ widgets.total_devices }}</div>
@@ -47,7 +47,7 @@
     </a>
   </div>
   <div class="col-6 col-lg">
-    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}">
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W2 · Devices at Risk</div>
         <div class="display-5 fw-bold text-danger">{{ widgets.at_risk }}</div>
@@ -56,7 +56,7 @@
     </a>
   </div>
   <div class="col-6 col-lg">
-    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-unauthorized' %}">
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-unauthorized' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W3 · Quarantined / Blocked</div>
         <div class="display-5 fw-bold text-warning">{{ widgets.quarantined }}</div>
@@ -65,7 +65,7 @@
     </a>
   </div>
   <div class="col-6 col-lg">
-    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}">
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W4 · Threat Events ({{ filters.range }})</div>
         <div class="display-5 fw-bold">{{ widgets.threats_window }}</div>
@@ -116,6 +116,7 @@
         <th>Device type</th><th class="text-end">Devices</th><th class="text-end">Events</th>
         <th class="text-end">Threats</th><th class="text-end">Critical</th>
         <th class="text-end">Traffic (MB)</th><th class="text-end">% Blocked</th>
+        <th class="text-end">Compliance</th>
       </tr></thead>
       <tbody>
         {% for t in leaderboard %}
@@ -127,6 +128,7 @@
           <td class="text-end">{{ t.critical }}</td>
           <td class="text-end">{{ t.traffic_mb }}</td>
           <td class="text-end">{{ t.pct_blocked }}%</td>
+          <td class="text-end fw-semibold {% if t.compliance >= 90 %}text-success{% elif t.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ t.compliance }}%</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -140,7 +142,7 @@
     <div class="card shadow-sm h-100"><div class="card-body">
       <div class="d-flex justify-content-between align-items-center mb-2">
         <h6 class="card-title mb-0">Top IoT Devices at Risk <span class="text-muted small">(Widget 2 · all types)</span></h6>
-        <a href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}" class="btn btn-sm btn-outline-secondary">Full report</a>
+        <a href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}" class="btn btn-sm btn-outline-secondary">Full report</a>
       </div>
       <div class="js-lazy-table"
            data-url="{% url 'dashboard:atrisk_partial' %}?site={{ filters.site|urlencode }}&range={{ filters.range }}">
@@ -181,6 +183,7 @@
           <div class="small text-muted">threats</div>
           <div class="small mt-1">{{ t.devices }} devices · {{ t.traffic_mb }} MB</div>
           <div class="small text-muted">{{ t.critical }} critical · {{ t.pct_blocked }}% blocked</div>
+          <div class="small fw-semibold {% if t.compliance >= 90 %}text-success{% elif t.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ t.compliance }}% compliant</div>
         </div>
       </div>
     </a>

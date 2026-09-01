@@ -237,6 +237,8 @@ def by_device_type(hours=None, site=None):
             .values("device_type")
             .annotate(
                 devices=Count("device_mac", distinct=True),
+                at_risk=Count("device_mac", distinct=True,
+                              filter=~Q(event_type="Connection")),
                 events=Count("id"),
                 threats=Count("id", filter=~Q(event_type="Connection")),
                 critical=Count("id", filter=Q(severity="Critical")
@@ -251,6 +253,7 @@ def by_device_type(hours=None, site=None):
         out.append({
             "device_type": r["device_type"] or "(unclassified)",
             "devices": r["devices"] or 0,
+            "at_risk": r["at_risk"] or 0,
             "events": events,
             "threats": r["threats"] or 0,
             "critical": r["critical"] or 0,

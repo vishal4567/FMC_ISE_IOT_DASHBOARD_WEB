@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import csv
+from datetime import datetime, timedelta
 
 from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
+from django.utils import timezone
 
 from . import services
 from .adminauth import admin_required
@@ -50,6 +52,9 @@ def index(request):
     for r in leaderboard:
         r["active_devices"] = r["devices"]
         r["devices"] = ise_counts.get(r["device_type"], r["devices"])
+        _risk = min(r.get("at_risk", 0), r["devices"])
+        r["compliance"] = round(100 * (r["devices"] - _risk) / r["devices"]) \
+            if r["devices"] else 100
 
     # ===== Dashboard 2 - one DEVICE TYPE (default = most threats) =====
     types = [r["device_type"] for r in leaderboard]  # ordered by threats desc
@@ -227,15 +232,47 @@ def dataset_json(request, key):
     if ds is None:
         raise Http404("Unknown dataset")
     payload = services.fetch_dataset(key)
+    rows = _filter_rows(payload["rows"], request)
     return JsonResponse({
         "key": key,
         "label": ds.label,
-        "rows": payload["rows"],
-        "columns": payload["columns"] or _infer_cols(payload["rows"]),
+        "rows": rows,
+        "columns": payload["columns"] or _infer_cols(rows),
         "error": payload["error"],
         "fetched_at": payload.get("fetched_at"),
-        "count": len(payload["rows"]),
+        "count": len(rows),
     })
+
+
+def _filter_rows(rows, request):
+    """Apply the dashboard Site / device-type / Time filters (from query params)
+    to a dataset's rows - generic, only on fields the rows actually carry, so a
+    clicked-through table shows the SAME scope as the dashboard."""
+    if not rows or not isinstance(rows[0], dict):
+        return rows
+    from dashboard.analytics import SITE_UNASSIGNED
+
+    sample = rows[0]
+    site = (request.GET.get("site") or "").strip()
+    dtype = (request.GET.get("type") or "").strip()
+    hours = {"1h": 1, "24h": 24, "7d": 168}.get(request.GET.get("range") or "")
+
+    if site and site != "All" and "site" in sample:
+        if site == SITE_UNASSIGNED:
+            rows = [r for r in rows
+                    if (r.get("site") or "").strip().lower() in ("", "all locations")]
+        else:
+            rows = [r for r in rows if (r.get("site") or "") == site]
+    if dtype and dtype != "All" and "device_type" in sample:
+        if dtype == "(unclassified)":
+            rows = [r for r in rows if not (r.get("device_type") or "")]
+        else:
+            rows = [r for r in rows if (r.get("device_type") or "") == dtype]
+    if hours and "_ts" in sample and isinstance(sample.get("_ts"), datetime):
+        cutoff = timezone.now() - timedelta(hours=hours)
+        rows = [r for r in rows
+                if isinstance(r.get("_ts"), datetime) and r["_ts"] >= cutoff]
+    return rows
 
 
 def _infer_cols(rows):
@@ -256,12 +293,13 @@ def dataset_csv(request, key):
 
     payload = services.fetch_dataset(key, use_cache=True)
     columns = payload["columns"] or ["value"]
+    rows = _filter_rows(payload["rows"], request)
 
     response = HttpResponse(content_type="text/csv")
     response["Content-Disposition"] = f'attachment; filename="{key}.csv"'
     writer = csv.writer(response)
     writer.writerow(columns)
-    for row in payload["rows"]:
+    for row in rows:
         writer.writerow([_stringify(row.get(c, "")) for c in columns])
     return response
 

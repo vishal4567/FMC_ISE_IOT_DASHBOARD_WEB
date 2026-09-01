@@ -21,7 +21,7 @@
     <div class="small text-muted">Maps to: {{ dataset.widget }}</div>
   </div>
   <div class="text-end">
-    <a href="{% url 'dashboard:dataset_csv' dataset.key %}" class="btn btn-sm btn-success">⬇ Export CSV</a>
+    <a id="csv-link" href="{% url 'dashboard:dataset_csv' dataset.key %}" class="btn btn-sm btn-success">⬇ Export CSV</a>
     <button id="reload" class="btn btn-sm btn-outline-primary">↻ Reload</button>
     <div id="meta" class="small text-muted mt-1"></div>
   </div>
@@ -44,7 +44,9 @@
 
 {% block scripts %}
 <script>
-  const DATA_URL = "{% url 'dashboard:dataset_json' dataset.key %}";
+  // Forward the current Site / Time / device-type filters (query string) so the
+  // table shows the SAME scope as the dashboard the user clicked from.
+  const DATA_URL = "{% url 'dashboard:dataset_json' dataset.key %}" + window.location.search;
   let dt = null;
 
   function esc(v) {
@@ -94,6 +96,11 @@
       });
   }
 
-  $(function () { load(); $("#reload").on("click", load); });
+  $(function () {
+    // carry the filters onto the CSV export too
+    var q = window.location.search;
+    if (q) { var c = document.getElementById("csv-link"); c.href = c.href + q; }
+    load(); $("#reload").on("click", load);
+  });
 </script>
 {% endblock %}
