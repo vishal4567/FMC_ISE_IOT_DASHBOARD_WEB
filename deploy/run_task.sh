@@ -45,6 +45,10 @@ case "${1:-}" in
     need_root
     start sync "$PY $APP_DIR/manage.py sync_ise"
     ;;
+  fast)
+    need_root
+    start fast "$PY $APP_DIR/manage.py sync_iot_fast"
+    ;;
   restamp)
     need_root
     start restamp "$PY $APP_DIR/manage.py restamp_sites --events"
@@ -69,7 +73,7 @@ case "${1:-}" in
     systemctl list-units "${PREFIX}-*" --all --no-pager
     ;;
   *)
-    echo "usage: sudo bash $0 {sync|restamp|both|status [name]|logs <name>|stop <name>|list}"
+    echo "usage: sudo bash $0 {sync|fast|restamp|both|status [name]|logs <name>|stop <name>|list}"
     exit 1
     ;;
 esac
