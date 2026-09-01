@@ -178,42 +178,34 @@ def _ise_profiles():
     return get_ise_client().get_profiler_profiles()
 
 
-def _device_counts_by_profile() -> dict:
-    """{profiler_policy: onboarded-device-count} from the IoTDevice inventory."""
+def _onboarded_logical_profiles():
+    """Onboarded LOGICAL profiles: one row per logical profile in our IoTDevice
+    inventory, with the number of devices onboarded under it."""
     from django.db.models import Count
 
     from dashboard.models import IoTDevice
 
-    return {r["ise_profile"]: r["n"] for r in
-            IoTDevice.objects.values("ise_profile").annotate(n=Count("id"))}
+    rows = (IoTDevice.objects.exclude(logical_profile="")
+            .values("logical_profile").annotate(devices=Count("id"))
+            .order_by("-devices"))
+    return [{"logical_profile": r["logical_profile"], "devices": r["devices"]}
+            for r in rows]
 
 
-def _ise_logical_profiles():
-    # LOGICAL_PROFILES: each logical profile and the profiler policies mapped to
-    # it, with the count of devices onboarded for each policy.
-    if _dc_on():
-        _, rows = get_dataconnect_client().query(
-            "SELECT logical_profile, assigned_policies AS profiler_profile "
-            "FROM logical_profiles ORDER BY logical_profile, assigned_policies")
-        counts = _device_counts_by_profile()
-        for r in rows:
-            r["devices"] = counts.get(r.get("profiler_profile"), 0)
-        return rows
-    return []
+def _onboarded_profiler_profiles():
+    """Onboarded PROFILER profiles: one row per profiler policy in our IoTDevice
+    inventory, with the number of devices of each (and its logical profile)."""
+    from django.db.models import Count, Max
 
+    from dashboard.models import IoTDevice
 
-def _ise_mapped_profiles():
-    # LOGICAL_PROFILES the other way: each profiler policy, the ISE logical
-    # profile it maps to, and the count of devices onboarded for it.
-    if _dc_on():
-        _, rows = get_dataconnect_client().query(
-            "SELECT assigned_policies AS profiler_profile, logical_profile "
-            "FROM logical_profiles ORDER BY assigned_policies")
-        counts = _device_counts_by_profile()
-        for r in rows:
-            r["devices"] = counts.get(r.get("profiler_profile"), 0)
-        return rows
-    return []
+    rows = (IoTDevice.objects.exclude(ise_profile="")
+            .values("ise_profile")
+            .annotate(devices=Count("id"), logical_profile=Max("logical_profile"))
+            .order_by("-devices"))
+    return [{"profiler_profile": r["ise_profile"],
+             "logical_profile": r["logical_profile"] or "",
+             "devices": r["devices"]} for r in rows]
 
 
 def _ise_sessions():
@@ -366,21 +358,23 @@ DATASETS: dict[str, Dataset] = {
         ),
         Dataset(
             key="ise-logical-profiles",
-            label="Mapped ISE Logical Profiles",
+            label="Onboarded Logical Profiles",
             source="ISE",
-            fetch=_ise_logical_profiles,
-            widget="Logical profile - profiler policies",
-            description="ISE logical profiles and the profiler policies mapped "
-            "to each (logical profile -> profiler profile).",
+            fetch=_onboarded_logical_profiles,
+            derived=True,
+            widget="Logical profiles onboarded + device counts",
+            description="Logical profiles onboarded in this environment and the "
+            "number of devices under each.",
         ),
         Dataset(
             key="ise-mapped-profiles",
-            label="Mapped Profiler Profiles",
+            label="Onboarded Profiler Profiles",
             source="ISE",
-            fetch=_ise_mapped_profiles,
-            widget="Profiler policy - logical profile",
-            description="Profiler profiles and the ISE logical profile each maps "
-            "to (profiler profile -> logical profile).",
+            fetch=_onboarded_profiler_profiles,
+            derived=True,
+            widget="Profiler profiles onboarded + device counts",
+            description="Profiler profiles onboarded in this environment, the "
+            "logical profile each maps to, and the number of devices of each.",
         ),
         Dataset(
             key="ise-sessions",
