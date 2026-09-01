@@ -357,25 +357,28 @@ class DataConnectClient:
         profiling policies (``assigned_policies``) and selects those endpoints.
         Returns mac + device_type (= endpoint_policy) + ip in the
         iot_endpoints() shape; site is resolved separately from the NAD name."""
+        lpcol = f"lp.{lp_name_col}"
         binds, conds = {}, []
         if logical_profiles:
             lkeys = []
             for i, name in enumerate(logical_profiles):
                 binds[f"l{i}"] = name
                 lkeys.append(f":l{i}")
-            conds.append(f"{lp_name_col} IN ({', '.join(lkeys)})")
+            conds.append(f"{lpcol} IN ({', '.join(lkeys)})")
         if match:
             binds["lpm"] = f"%{match.upper()}%"
-            conds.append(f"UPPER({lp_name_col}) LIKE :lpm")
+            conds.append(f"UPPER({lpcol}) LIKE :lpm")
         if not conds:
             return []
         lp_where = "(" + " OR ".join(conds) + ")"
-        select = [f"{mac_col} AS mac", f"MAX({profile_col}) AS profile"]
+        # JOIN so we can also return WHICH logical profile each device matched.
+        select = [f"e.{mac_col} AS mac", f"MAX(e.{profile_col}) AS profile",
+                  f"MAX({lpcol}) AS logical_profile"]
         if ip_col:
-            select.append(f"MAX({ip_col}) AS ip")
-        sql = (f"SELECT {', '.join(select)} FROM {endpoints_view} "
-               f"WHERE {profile_col} IN (SELECT {lp_policy_col} FROM {lp_view} "
-               f"WHERE {lp_where}) GROUP BY {mac_col}")
+            select.append(f"MAX(e.{ip_col}) AS ip")
+        sql = (f"SELECT {', '.join(select)} FROM {endpoints_view} e "
+               f"JOIN {lp_view} lp ON e.{profile_col} = lp.{lp_policy_col} "
+               f"WHERE {lp_where} GROUP BY e.{mac_col}")
         if limit:
             sql += f" FETCH FIRST {int(limit)} ROWS ONLY"
         _, rows = self.query(sql, binds)
@@ -387,7 +390,7 @@ class DataConnectClient:
             out.append({
                 "mac": mac,
                 "endpoint_profile": r.get("profile", "") or "",
-                "logical_profile": "",
+                "logical_profile": r.get("logical_profile", "") or "",
                 "device_type": r.get("profile", "") or "",
                 "ip": r.get("ip", "") or "",
                 "site": "",

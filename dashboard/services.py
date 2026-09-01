@@ -134,6 +134,7 @@ def _ise_endpoints():
             "mac": d.mac,
             "device_type": d.device_type,
             "endpoint_profile": d.ise_profile,
+            "logical_profile": d.logical_profile or d.ise_identity_group,
             "site": d.site,
             "ip": d.ip or "",
             "hostname": d.hostname,

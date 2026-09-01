@@ -417,6 +417,7 @@ def sync_iot_endpoints(log=None) -> dict:
                 "site": r.get("site", ""),
                 "ip": r.get("ip") or None,
                 "ise_profile": r.get("endpoint_profile", ""),
+                "logical_profile": r.get("logical_profile", ""),
                 "ise_identity_group": r.get("logical_profile", ""),
                 "correlation": "Matched",
                 "ise_endpoint_mac": mac,
