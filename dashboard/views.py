@@ -255,7 +255,11 @@ def _filter_rows(rows, request):
     sample = rows[0]
     site = (request.GET.get("site") or "").strip()
     dtype = (request.GET.get("type") or "").strip()
+    sev = (request.GET.get("severity") or "").strip()
     hours = {"1h": 1, "24h": 24, "7d": 168}.get(request.GET.get("range") or "")
+
+    if sev and "severity" in sample:
+        rows = [r for r in rows if (r.get("severity") or "") == sev]
 
     if site and site != "All" and "site" in sample:
         if site == SITE_UNASSIGNED:

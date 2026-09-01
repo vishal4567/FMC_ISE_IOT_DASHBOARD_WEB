@@ -74,18 +74,22 @@
     </a>
   </div>
   <div class="col-6 col-lg">
-    <div class="card widget shadow-sm h-100"><div class="card-body text-center">
-      <div class="text-muted small text-uppercase">W5 · Critical Attacks</div>
-      <div class="display-5 fw-bold text-danger">{{ widgets.critical }}</div>
-      <div class="small text-muted">Highest severity · {{ filters.range }}</div>
-    </div></div>
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}{% if request.GET %}?{{ request.GET.urlencode }}&severity=Critical{% else %}?severity=Critical{% endif %}">
+      <div class="card widget shadow-sm h-100"><div class="card-body text-center">
+        <div class="text-muted small text-uppercase">W5 · Critical Attacks</div>
+        <div class="display-5 fw-bold text-danger">{{ widgets.critical }}</div>
+        <div class="small text-muted">Highest severity · {{ filters.range }}</div>
+      </div></div>
+    </a>
   </div>
   <div class="col-6 col-lg">
-    <div class="card widget shadow-sm h-100"><div class="card-body text-center">
-      <div class="text-muted small text-uppercase">Compliance Score</div>
-      <div class="display-5 fw-bold {% if compliance.score >= 90 %}text-success{% elif compliance.score >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ compliance.score }}%</div>
-      <div class="small text-muted">{{ compliance.compliant }} / {{ compliance.total }} not at risk</div>
-    </div></div>
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}">
+      <div class="card widget shadow-sm h-100"><div class="card-body text-center">
+        <div class="text-muted small text-uppercase">Compliance Score</div>
+        <div class="display-5 fw-bold {% if compliance.score >= 90 %}text-success{% elif compliance.score >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ compliance.score }}%</div>
+        <div class="small text-muted">{{ compliance.compliant }} / {{ compliance.total }} not at risk</div>
+      </div></div>
+    </a>
   </div>
 </div>
 <div class="mb-4"></div>
@@ -207,27 +211,27 @@
   {% else %}
   <!-- 6 event tiles -->
   <div class="row g-3 mb-3">
-    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+    <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Devices</div>
-      <div class="h2 mb-0 text-primary">{{ type_metrics.devices }}</div></div></div></div>
-    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="h2 mb-0 text-primary">{{ type_metrics.devices }}</div></div></div></a></div>
+    <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">At Risk</div>
-      <div class="h2 mb-0 text-danger">{{ type_metrics.at_risk }}</div></div></div></div>
-    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="h2 mb-0 text-danger">{{ type_metrics.at_risk }}</div></div></div></a></div>
+    <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Threat Events</div>
-      <div class="h2 mb-0">{{ type_metrics.threats }}</div></div></div></div>
-    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="h2 mb-0">{{ type_metrics.threats }}</div></div></div></a></div>
+    <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}{% if request.GET %}?{{ request.GET.urlencode }}&severity=Critical{% else %}?severity=Critical{% endif %}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Critical</div>
-      <div class="h2 mb-0 text-danger">{{ type_metrics.critical }}</div></div></div></div>
-    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="h2 mb-0 text-danger">{{ type_metrics.critical }}</div></div></div></a></div>
+    <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Traffic (MB)</div>
-      <div class="h2 mb-0">{{ type_metrics.traffic_mb }}</div></div></div></div>
-    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="h2 mb-0">{{ type_metrics.traffic_mb }}</div></div></div></a></div>
+    <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">% Blocked</div>
-      <div class="h2 mb-0">{{ type_metrics.pct_blocked }}%</div></div></div></div>
-    <div class="col-6 col-lg-2"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="h2 mb-0">{{ type_metrics.pct_blocked }}%</div></div></div></a></div>
+    <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}{% if request.GET %}?{{ request.GET.urlencode }}{% endif %}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Compliance</div>
-      <div class="h2 mb-0 {% if type_metrics.compliance >= 90 %}text-success{% elif type_metrics.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ type_metrics.compliance }}%</div></div></div></div>
+      <div class="h2 mb-0 {% if type_metrics.compliance >= 90 %}text-success{% elif type_metrics.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ type_metrics.compliance }}%</div></div></div></a></div>
   </div>
 
   <!-- type charts -->
