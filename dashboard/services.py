@@ -178,6 +178,28 @@ def _ise_profiles():
     return get_ise_client().get_profiler_profiles()
 
 
+def _ise_logical_profiles():
+    # LOGICAL_PROFILES: each logical profile and the profiler policies mapped to
+    # it (logical_profile -> assigned_policies).
+    if _dc_on():
+        _, rows = get_dataconnect_client().query(
+            "SELECT logical_profile, assigned_policies AS profiler_profile "
+            "FROM logical_profiles ORDER BY logical_profile, assigned_policies")
+        return rows
+    return []
+
+
+def _ise_mapped_profiles():
+    # LOGICAL_PROFILES viewed the other way: each profiler policy and the ISE
+    # logical profile it maps to (assigned_policies -> logical_profile).
+    if _dc_on():
+        _, rows = get_dataconnect_client().query(
+            "SELECT assigned_policies AS profiler_profile, logical_profile "
+            "FROM logical_profiles ORDER BY assigned_policies")
+        return rows
+    return []
+
+
 def _ise_sessions():
     # Fetch the ACTIVE sessions once, then drop non-IoT devices in code (keep only
     # MACs in the synced IoTDevice inventory). Run sync_ise first to populate it.
@@ -325,6 +347,24 @@ DATASETS: dict[str, Dataset] = {
             widget="Device type / category",
             description="Profiler profiles (camera, printer, sensor, ...). "
             "Empty if the ERS resource is unavailable on this ISE version.",
+        ),
+        Dataset(
+            key="ise-logical-profiles",
+            label="Mapped ISE Logical Profiles",
+            source="ISE",
+            fetch=_ise_logical_profiles,
+            widget="Logical profile - profiler policies",
+            description="ISE logical profiles and the profiler policies mapped "
+            "to each (logical profile -> profiler profile).",
+        ),
+        Dataset(
+            key="ise-mapped-profiles",
+            label="Mapped Profiler Profiles",
+            source="ISE",
+            fetch=_ise_mapped_profiles,
+            widget="Profiler policy - logical profile",
+            description="Profiler profiles and the ISE logical profile each maps "
+            "to (profiler profile -> logical profile).",
         ),
         Dataset(
             key="ise-sessions",
