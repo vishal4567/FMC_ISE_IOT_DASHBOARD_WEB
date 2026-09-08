@@ -88,7 +88,9 @@ def enrich_with_ise(event: dict, ise_map: dict, ip_map: dict | None = None) -> d
         event["site"] = event.get("site") or ise.site
         if not event.get("hostname"):
             event["hostname"] = ise.hostname
-        if not event.get("device_ip") and ise.ip:
+        # device_ip = the device's ISE endpoint IP (identity), NOT the flow's
+        # initiator/source. source_ip/dest_ip still hold the raw flow IPs.
+        if ise.ip:
             event["device_ip"] = str(ise.ip)
     else:
         event["in_ise"] = False
