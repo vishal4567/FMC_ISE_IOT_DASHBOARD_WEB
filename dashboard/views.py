@@ -33,6 +33,11 @@ def index(request):
     rng = request.GET.get("range") or "24h"
     hours = {"1h": 1, "24h": 24, "7d": 168}.get(rng, 24)
 
+    # Click-through query strings: Dashboard 1 tiles carry ONLY site+time (they
+    # are all-devices); Dashboard 2 (device-type) tiles also carry the type.
+    from urllib.parse import urlencode
+    overall_q = urlencode({"site": site, "range": rng})
+
     # ===== Dashboard 1 - ALL devices — NUMBERS ONLY =====
     # The at-risk *device rows* are NOT computed here; they stream in via
     # atrisk_partial (api/atrisk/) only when the user opens the table. The page
@@ -98,6 +103,8 @@ def index(request):
         },
         "correlation": corr,
         "compliance": compliance,
+        "overall_q": overall_q,
+        "type_q": urlencode({"site": site, "range": rng, "type": selected or ""}),
         "leaderboard": leaderboard,
         "severity_json": json.dumps(severity_all),
         "trend_json": json.dumps(trend_all["points"]),
@@ -231,17 +238,42 @@ def dataset_json(request, key):
     ds = services.DATASETS.get(key)
     if ds is None:
         raise Http404("Unknown dataset")
-    payload = services.fetch_dataset(key)
-    rows = _filter_rows(payload["rows"], request)
+    live = _live_filtered(key, request)
+    if live is not None:
+        rows = live
+        columns, error, fetched_at = _infer_cols(rows), None, None
+    else:
+        payload = services.fetch_dataset(key)
+        rows = _filter_rows(payload["rows"], request)
+        columns = payload["columns"] or _infer_cols(rows)
+        error, fetched_at = payload["error"], payload.get("fetched_at")
     return JsonResponse({
         "key": key,
         "label": ds.label,
         "rows": rows,
-        "columns": payload["columns"] or _infer_cols(rows),
-        "error": payload["error"],
-        "fetched_at": payload.get("fetched_at"),
+        "columns": columns,
+        "error": error,
+        "fetched_at": fetched_at,
         "count": len(rows),
     })
+
+
+def _live_filtered(key, request):
+    """For datasets that natively support (hours, site, device_type), compute
+    live with the active filters - so a click-through table honours the Time
+    (and Site/Type) filter even though its rows are aggregated (no per-row
+    timestamp for _filter_rows to use). Returns rows, or None to fall back."""
+    hours = {"1h": 1, "24h": 24, "7d": 168}.get(request.GET.get("range") or "")
+    site = (request.GET.get("site") or "").strip() or None
+    if site == "All":
+        site = None
+    dtype = (request.GET.get("type") or "").strip() or None
+    if dtype == "All":
+        dtype = None
+    if key == "sim-devices-at-risk":
+        from dashboard import analytics
+        return analytics.devices_at_risk(hours=hours, site=site, device_type=dtype)
+    return None
 
 
 def _filter_rows(rows, request):
