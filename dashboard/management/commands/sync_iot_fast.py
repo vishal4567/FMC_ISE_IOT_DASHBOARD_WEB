@@ -10,6 +10,7 @@ No per-device REST, no thread pool - built for full (re)loads at scale.
     manage.py sync_iot_fast              # upsert all (insert new + refresh existing)
     manage.py sync_iot_fast --additive   # insert ONLY new MACs, keep existing rows
 """
+import sys
 import time
 
 from django.conf import settings
@@ -100,15 +101,30 @@ class Command(BaseCommand):
                 last_seen=now,
             ))
 
-        if opts["additive"]:
-            IoTDevice.objects.bulk_create(objs, batch_size=2000,
-                                          ignore_conflicts=True)
-        else:
-            IoTDevice.objects.bulk_create(
-                objs, batch_size=2000, update_conflicts=True,
-                unique_fields=["mac"],
-                update_fields=["device_type", "site", "ip", "ise_profile",
-                               "logical_profile", "ise_identity_group",
-                               "correlation", "last_seen"])
+        # bulk write in chunks with a progress bar
+        total = len(objs)
+        chunk = 2000
+        written = 0
+        tw = time.time()
+        for i in range(0, total, chunk):
+            part = objs[i:i + chunk]
+            if opts["additive"]:
+                IoTDevice.objects.bulk_create(part, ignore_conflicts=True)
+            else:
+                IoTDevice.objects.bulk_create(
+                    part, update_conflicts=True, unique_fields=["mac"],
+                    update_fields=["device_type", "site", "ip", "ise_profile",
+                                   "logical_profile", "ise_identity_group",
+                                   "correlation", "last_seen"])
+            written += len(part)
+            pct = int(100 * written / total)
+            fill = pct * 30 // 100
+            rate = written / (time.time() - tw) if time.time() > tw else 0
+            sys.stdout.write(
+                f"\rwriting [{'#' * fill}{'.' * (30 - fill)}] {pct:3d}%  "
+                f"{written:,}/{total:,}  {rate:,.0f}/s   ")
+            sys.stdout.flush()
+
         self.stdout.write(self.style.SUCCESS(
-            f"upserted {len(objs)} devices in {round(time.time()-t0,1)}s"))
+            f"\n{'added' if opts['additive'] else 'upserted'} {total:,} devices "
+            f"in {round(time.time()-t0,1)}s"))
