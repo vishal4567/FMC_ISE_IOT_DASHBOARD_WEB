@@ -513,3 +513,13 @@ def purge_retention() -> dict:
         threat_days=settings.RETENTION_THREAT_DAYS,
         connection_days=settings.RETENTION_CONNECTION_DAYS,
     )
+
+
+@shared_task(name="dashboard.tasks.sync_iot_fast")
+def sync_iot_fast() -> dict:
+    """Scheduled FAST IoT sync: logical-profile discovery + bulk upsert (refreshes
+    existing devices too). Runs the sync_iot_fast management command in-process."""
+    from django.core.management import call_command
+
+    call_command("sync_iot_fast")
+    return {"ok": True}
