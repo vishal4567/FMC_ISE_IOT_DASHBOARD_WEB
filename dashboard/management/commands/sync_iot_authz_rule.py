@@ -3,8 +3,9 @@ IoT sync driven by the RADIUS AUTHORIZATION RULE.
 
 Discovers every device whose authorization_rule contains 'IOT' (any case) from
 the full radius_authentications log, taking the LATEST auth row per MAC. Maps:
-    device_type            <- identity_group        (e.g. Wipro_CCTV)
+    device_type            <- endpoint_profile       (the profiler device class)
     authorization_profile  <- authorization_rule     (e.g. IOT-CCTV, IOT-Quarantine-Access)
+    ise_identity_group     <- identity_group         (e.g. Wipro_CCTV)
     ip                     <- framed_ip_address
     site                   <- device_name -> site-code map (backup: location leaf)
 A device whose authorization_profile contains 'Quarantine' is a quarantined
@@ -56,6 +57,7 @@ class Command(BaseCommand):
             view=dc.get("AUTHENTICATIONS_VIEW", "radius_authentications"),
             mac_col=dc["COL_LOC_MAC"],
             rule_col=dc.get("COL_AUTHZ_RULE", "authorization_rule"),
+            profile_col=dc.get("AUTHZ_COL_PROFILE", "endpoint_profile"),
             group_col=dc.get("COL_IDENTITY_GROUP", "identity_group"),
             ip_col=dc.get("COL_FRAMED_IP", "framed_ip_address"),
             host_col=dc["LOC_HOST_COL"] or "device_name",
@@ -86,14 +88,16 @@ class Command(BaseCommand):
             site = site_from_hostname(r.get("host", ""), matcher) \
                 or r.get("location", "") or ""
             rule = r.get("authz_rule", "") or ""
+            profile = r.get("endpoint_profile", "") or ""
             if "QUARANTINE" in rule.upper():
                 quarantined += 1
             objs.append(IoTDevice(
                 mac=r["mac"],
-                device_type=r.get("device_type", "") or "",   # identity_group
+                device_type=profile,                            # endpoint_profile
                 site=site,
                 ip=r.get("ip") or None,
-                ise_identity_group=r.get("device_type", "") or "",
+                ise_profile=profile,
+                ise_identity_group=r.get("identity_group", "") or "",
                 authorization_profile=rule,
                 correlation="Matched",
                 ise_endpoint_mac=r["mac"],
@@ -112,7 +116,7 @@ class Command(BaseCommand):
             else:
                 IoTDevice.objects.bulk_create(
                     part, update_conflicts=True, unique_fields=["mac"],
-                    update_fields=["device_type", "site", "ip",
+                    update_fields=["device_type", "site", "ip", "ise_profile",
                                    "ise_identity_group", "authorization_profile",
                                    "correlation", "last_seen"])
             written += len(part)

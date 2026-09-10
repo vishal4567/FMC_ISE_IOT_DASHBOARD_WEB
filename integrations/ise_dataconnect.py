@@ -407,6 +407,7 @@ class DataConnectClient:
     def iot_by_authz_rule(self, *, match="IOT", view="radius_authentications",
                           mac_col="calling_station_id",
                           rule_col="authorization_rule",
+                          profile_col="endpoint_profile",
                           group_col="identity_group",
                           ip_col="framed_ip_address",
                           host_col="device_name", loc_col="location",
@@ -414,12 +415,13 @@ class DataConnectClient:
         """Discover IoT endpoints from the full RADIUS auth log where the
         AUTHORIZATION RULE name contains ``match`` (e.g. 'IOT', any case). One
         row per MAC, taking the LATEST auth row per MAC (``MAX(x) KEEP
-        (DENSE_RANK LAST ORDER BY time)``) for its rule / identity_group / ip /
-        NAD / location. ``days`` time-bounds the (full-history) scan.
+        (DENSE_RANK LAST ORDER BY time)``) for its rule / endpoint_profile /
+        identity_group / ip / NAD / location. ``days`` time-bounds the scan.
 
-        Returns dicts in the iot_endpoints() shape, plus:
-          device_type   <- identity_group (the real device class, e.g. Wipro_CCTV)
-          authz_rule     <- authorization_rule (shown as 'Authorization Profile')
+        Returns per-MAC dicts:
+          endpoint_profile <- endpoint_profile (the device class -> device_type)
+          identity_group   <- identity_group   (e.g. Wipro_CCTV)
+          authz_rule       <- authorization_rule (shown as 'Authorization Profile')
         Site is resolved separately from the NAD ``host``."""
         def last(col):
             return f"MAX({col}) KEEP (DENSE_RANK LAST ORDER BY {time_col})"
@@ -427,6 +429,8 @@ class DataConnectClient:
         window = (f" AND {time_col} >= SYSTIMESTAMP - INTERVAL '{int(days)}' DAY"
                   if days and time_col else "")
         sel = [f"{mac_col} AS mac", f"{last(rule_col)} AS rule"]
+        if profile_col:
+            sel.append(f"{last(profile_col)} AS profile")
         if group_col:
             sel.append(f"{last(group_col)} AS grp")
         if ip_col:      # latest IP, else any non-null IP the MAC ever had
@@ -447,8 +451,9 @@ class DataConnectClient:
                 continue
             out.append({
                 "mac": mac,
-                "device_type": r.get("grp", "") or "",     # identity_group
-                "authz_rule": r.get("rule", "") or "",      # authorization_rule
+                "endpoint_profile": r.get("profile", "") or "",  # -> device_type
+                "identity_group": r.get("grp", "") or "",
+                "authz_rule": r.get("rule", "") or "",           # authorization_rule
                 "ip": r.get("ip", "") or "",
                 "host": r.get("host", "") or "",
                 "location": _loc_leaf(r.get("location", "")),
