@@ -29,6 +29,9 @@ class Command(BaseCommand):
                             default="authz",
                             help="which field(s) to match: authorization_profiles "
                                  "(authz), security_group (sgt), or both")
+        parser.add_argument("--col", default=None,
+                            help="match THIS exact column instead of --field "
+                                 "(e.g. authorization_profiles, authorization_rule)")
         parser.add_argument("--extra-sgt", nargs="*", default=[],
                             help="extra security_group names to include verbatim "
                                  "(e.g. CCTV_Cameras Access_Control_Devices BMS_Devices)")
@@ -50,10 +53,13 @@ class Command(BaseCommand):
         tok = f"%{opts['match'].upper()}%"
 
         conds, binds = [], {"m": tok}
-        if opts["field"] in ("authz", "both"):
-            conds.append(f"UPPER({dc['COL_AUTHZ']}) LIKE :m")
-        if opts["field"] in ("sgt", "both"):
-            conds.append("UPPER(security_group) LIKE :m")
+        if opts["col"]:
+            conds.append(f"UPPER({opts['col']}) LIKE :m")
+        else:
+            if opts["field"] in ("authz", "both"):
+                conds.append(f"UPPER({dc['COL_AUTHZ']}) LIKE :m")
+            if opts["field"] in ("sgt", "both"):
+                conds.append("UPPER(security_group) LIKE :m")
         if opts["extra_sgt"]:
             keys = []
             for i, name in enumerate(opts["extra_sgt"]):
