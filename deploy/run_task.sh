@@ -71,9 +71,10 @@ case "${1:-}" in
     ;;
   rebaseline)
     need_root
-    # TRUE replace: authz-rule sync + prune old devices, then re-map all stored
-    # events onto the new baseline, in one detached job
-    start rebaseline "$PY $APP_DIR/manage.py sync_iot_authz_rule --prune && \
+    # TRUE full replace (manual): authz-rule sync + FORCED prune (guard off),
+    # then re-map ALL stored events onto the new baseline, in one detached job.
+    # The hourly scheduler instead does a guarded prune + delta-only re-map.
+    start rebaseline "$PY $APP_DIR/manage.py sync_iot_authz_rule --prune --prune-guard 0 && \
                       $PY $APP_DIR/manage.py reenrich_events"
     ;;
   both)

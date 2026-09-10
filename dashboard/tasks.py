@@ -528,9 +528,11 @@ def sync_iot_fast() -> dict:
 @shared_task(name="dashboard.tasks.sync_iot_authz_rule")
 def sync_iot_authz_rule() -> dict:
     """Scheduled baseline: discover IoT devices by RADIUS authorization_rule
-    (~IOT) from radius_authentications, bulk upsert into IoTDevice. device_type
-    <- endpoint_profile, authorization_profile <- authorization_rule."""
+    (~IOT), bulk upsert into IoTDevice, GUARDED-prune devices that dropped out,
+    and re-map ONLY the events of the added/removed devices. device_type <-
+    endpoint_profile, authorization_profile <- authorization_rule."""
     from django.core.management import call_command
 
-    call_command("sync_iot_authz_rule")
+    # prune (guard 0.5 by default: skip if the query looks partial) + delta remap
+    call_command("sync_iot_authz_rule", prune=True, remap=True)
     return {"ok": True}

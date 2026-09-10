@@ -42,6 +42,15 @@ class Command(BaseCommand):
                                  "run's discovery, so the baseline becomes exactly "
                                  "the authz-rule set (removes old-baseline devices). "
                                  "Refused with --additive/--limit; use full history.")
+        parser.add_argument("--prune-guard", type=float, default=0.5,
+                            help="safety: SKIP the prune if the discovered set is "
+                                 "smaller than this fraction of the current "
+                                 "inventory (guards against a partial query wiping "
+                                 "devices). Default 0.5; set 0 to force prune.")
+        parser.add_argument("--remap", action="store_true",
+                            help="after the sync, re-map ONLY the events tied to "
+                                 "devices ADDED or REMOVED this run (by MAC or flow "
+                                 "IP) - not the whole event table.")
 
     def handle(self, *args, **opts):
         from dashboard.models import IoTDevice
@@ -84,10 +93,19 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("nothing discovered"))
             return
 
+        # snapshot the current inventory (mac -> ip) BEFORE writing, so we can
+        # compute what this run ADDS and REMOVES for the targeted event re-map.
+        cur = {m: ip for m, ip in IoTDevice.objects.values_list("mac", "ip")}
+        discovered = {r["mac"] for r in rows}
+        added_macs = discovered - set(cur)
+        removed_macs = set(cur) - discovered
+        added_ips = {str(r["ip"]) for r in rows
+                     if r["mac"] in added_macs and r.get("ip")}
+        removed_ips = {str(cur[m]) for m in removed_macs if cur.get(m)}
+
         if opts["additive"]:
-            existing = set(IoTDevice.objects.values_list("mac", flat=True))
-            rows = [r for r in rows if r["mac"] not in existing]
-            self.stdout.write(f"additive: {len(rows)} new (kept {len(existing)})")
+            rows = [r for r in rows if r["mac"] not in cur]
+            self.stdout.write(f"additive: {len(rows)} new (kept {len(cur)})")
             if not rows:
                 self.stdout.write(self.style.SUCCESS("no new devices"))
                 return
@@ -147,14 +165,70 @@ class Command(BaseCommand):
             f"\n{'added' if opts['additive'] else 'upserted'} {total:,} devices "
             f"({quarantined:,} quarantined) in {round(time.time()-t0,1)}s"))
 
-        # 4. prune — delete devices not in this run's discovery, so the baseline
-        #    is exactly the authz-rule set (removes old-baseline leftovers).
+        self.stdout.write(f"delta: +{len(added_macs):,} added / "
+                          f"-{len(removed_macs):,} removed vs {len(cur):,} existing")
+
+        # 4. guarded prune — delete devices no longer in the IoT set, UNLESS the
+        #    discovery looks partial (kept < guard * current), which would wipe
+        #    good devices on a transient query failure.
+        pruned = 0
         if opts["prune"]:
-            keep = {r["mac"] for r in rows}
-            stale = IoTDevice.objects.exclude(mac__in=keep)
-            n = stale.count()
-            if n:
-                stale.delete()
-            self.stdout.write(self.style.SUCCESS(
-                f"pruned {n:,} device(s) not in the current authz-rule baseline "
-                f"(kept {len(keep):,})"))
+            guard = opts["prune_guard"]
+            if guard > 0 and cur and len(discovered) < guard * len(cur):
+                self.stdout.write(self.style.WARNING(
+                    f"prune SKIPPED: discovered {len(discovered):,} < "
+                    f"{guard:.0%} of {len(cur):,} existing - looks partial, "
+                    f"not deleting. (use --prune-guard 0 to force.)"))
+                removed_macs, removed_ips = set(), set()   # nothing removed
+            else:
+                stale = IoTDevice.objects.exclude(mac__in=discovered)
+                pruned = stale.count()
+                if pruned:
+                    stale.delete()
+                self.stdout.write(self.style.SUCCESS(
+                    f"pruned {pruned:,} device(s) not in the baseline "
+                    f"(kept {len(discovered):,})"))
+
+        # 5. targeted re-map — re-stamp ONLY the events tied to devices added or
+        #    removed this run (by MAC or flow IP), from the now-current baseline.
+        if opts["remap"]:
+            self._remap_delta(added_macs | removed_macs, added_ips | removed_ips)
+
+    def _remap_delta(self, macs, ips):
+        from django.db.models import Q
+
+        from dashboard import event_store
+        from dashboard.models import SecurityEvent
+
+        if not macs and not ips:
+            self.stdout.write("re-map: no device changes, nothing to re-map")
+            return
+        q = Q()
+        if macs:
+            q |= Q(device_mac__in=macs)
+        if ips:
+            q |= Q(source_ip__in=ips) | Q(dest_ip__in=ips) | Q(device_ip__in=ips)
+
+        ise_map = event_store.ise_identity_map()
+        ip_map = event_store.ise_ip_map()
+        fields = event_store.REMAP_FIELDS
+        qs = SecurityEvent.objects.filter(q)
+        total = qs.count()
+        self.stdout.write(f"re-mapping {total:,} events tied to "
+                          f"{len(macs):,} changed MACs / {len(ips):,} IPs ...")
+        done = changed = 0
+        buf = []
+        for ev in qs.only("id", *fields, "source_ip", "dest_ip").iterator(
+                chunk_size=5000):
+            if event_store.remap_row(ev, ise_map, ip_map):
+                buf.append(ev)
+            done += 1
+            if len(buf) >= 5000:
+                SecurityEvent.objects.bulk_update(buf, fields)
+                changed += len(buf)
+                buf = []
+        if buf:
+            SecurityEvent.objects.bulk_update(buf, fields)
+            changed += len(buf)
+        self.stdout.write(self.style.SUCCESS(
+            f"re-mapped {done:,} delta events, {changed:,} rows changed"))

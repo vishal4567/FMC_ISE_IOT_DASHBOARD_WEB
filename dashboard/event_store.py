@@ -99,6 +99,47 @@ def enrich_with_ise(event: dict, ise_map: dict, ip_map: dict | None = None) -> d
     return event
 
 
+def remap_row(ev, ise_map: dict, ip_map: dict) -> bool:
+    """Re-stamp a stored SecurityEvent instance from the given ISE maps (match by
+    MAC first, then the raw flow IPs source_ip/dest_ip via the IP bridge).
+    Unmatched -> FMC-only (ISE fields cleared, device_ip reverts to source_ip).
+    Returns True if any identity field changed (so callers can bulk_update only
+    the rows that moved)."""
+    before = (ev.device_mac, str(ev.device_ip), ev.device_type, ev.site,
+              ev.hostname, ev.in_ise, ev.mapped_ise_mac)
+    mac = (ev.device_mac or "").upper()
+    ise = ise_map.get(mac) if mac and mac != "NONE" else None
+    if ise is None:
+        for ip in (ev.source_ip, ev.dest_ip):
+            if ip and str(ip) in ip_map:
+                ise = ip_map[str(ip)]
+                break
+    if ise:
+        ev.in_ise = True
+        ev.mapped_ise_mac = ise.mac
+        if not mac or mac == "NONE":
+            ev.device_mac = ise.mac
+        ev.device_type = ise.device_type or ""
+        ev.site = ise.site or ""
+        if ise.hostname:
+            ev.hostname = ise.hostname
+        if ise.ip:
+            ev.device_ip = str(ise.ip)
+    else:
+        ev.in_ise = False
+        ev.mapped_ise_mac = ""
+        ev.device_type = ""
+        ev.site = ""
+        ev.device_ip = ev.source_ip
+    after = (ev.device_mac, str(ev.device_ip), ev.device_type, ev.site,
+             ev.hostname, ev.in_ise, ev.mapped_ise_mac)
+    return after != before
+
+
+REMAP_FIELDS = ["device_mac", "device_ip", "device_type", "site", "hostname",
+                "in_ise", "mapped_ise_mac"]
+
+
 def bulk_ingest(event_dicts: list, batch_size: int = 1000) -> int:
     """Persist a batch of event dicts (as produced by the analytics or an
     eNcore parser) into ``SecurityEvent``. Returns the count written."""

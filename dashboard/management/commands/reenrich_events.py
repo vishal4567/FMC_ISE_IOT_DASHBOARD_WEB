@@ -52,49 +52,16 @@ class Command(BaseCommand):
             return
         self.stdout.write(f"re-mapping {total:,} events ...")
 
-        fields = ["device_mac", "device_ip", "device_type", "site", "hostname",
-                  "in_ise", "mapped_ise_mac"]
+        fields = event_store.REMAP_FIELDS
         batch = opts["batch"]
-        done = changed = matched = 0
+        done = changed = 0
         t0 = time.time()
         buf = []
 
         # .iterator() streams rows without loading all into memory
         for ev in qs.only("id", *fields, "source_ip", "dest_ip").iterator(
                 chunk_size=batch):
-            before = (ev.device_mac, str(ev.device_ip), ev.device_type, ev.site,
-                      ev.hostname, ev.in_ise, ev.mapped_ise_mac)
-
-            mac = (ev.device_mac or "").upper()
-            ise = ise_map.get(mac) if mac and mac != "NONE" else None
-            if ise is None:
-                for ip in (ev.source_ip, ev.dest_ip):
-                    if ip and str(ip) in ip_map:
-                        ise = ip_map[str(ip)]
-                        break
-
-            if ise:
-                matched += 1
-                ev.in_ise = True
-                ev.mapped_ise_mac = ise.mac
-                if not mac or mac == "NONE":
-                    ev.device_mac = ise.mac
-                ev.device_type = ise.device_type or ""
-                ev.site = ise.site or ""
-                if ise.hostname:
-                    ev.hostname = ise.hostname
-                if ise.ip:
-                    ev.device_ip = str(ise.ip)
-            else:
-                ev.in_ise = False
-                ev.mapped_ise_mac = ""
-                ev.device_type = ""
-                ev.site = ""
-                ev.device_ip = ev.source_ip   # revert to the raw flow IP
-
-            after = (ev.device_mac, str(ev.device_ip), ev.device_type, ev.site,
-                     ev.hostname, ev.in_ise, ev.mapped_ise_mac)
-            if after != before:
+            if event_store.remap_row(ev, ise_map, ip_map):
                 buf.append(ev)
             done += 1
 
@@ -116,5 +83,5 @@ class Command(BaseCommand):
             changed += len(buf)
 
         self.stdout.write(self.style.SUCCESS(
-            f"\nre-mapped {done:,} events: {matched:,} matched to baseline, "
-            f"{changed:,} rows changed, in {round(time.time()-t0,1)}s"))
+            f"\nre-mapped {done:,} events, {changed:,} rows changed, "
+            f"in {round(time.time()-t0,1)}s"))
