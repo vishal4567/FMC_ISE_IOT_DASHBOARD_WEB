@@ -132,7 +132,10 @@ def _ise_endpoints():
     for d in IoTDevice.objects.order_by("device_type", "mac"):
         rows.append({
             "mac": d.mac,
-            "device_type": d.device_type,
+            # device_type column shows the ISE identity group (e.g. Wipro_CCTV);
+            # endpoint_profile is kept separately below.
+            "device_type": d.ise_identity_group or d.device_type,
+            "endpoint_profile_class": d.device_type,
             "authorization_profile": d.authorization_profile,
             "quarantined": "Yes" if "QUARANTINE" in
                            (d.authorization_profile or "").upper() else "",
@@ -179,6 +182,26 @@ def _ise_profiles():
             "ORDER BY COUNT(*) DESC")
         return rows
     return get_ise_client().get_profiler_profiles()
+
+
+def _ise_quarantined():
+    """IoT devices currently in a QUARANTINE authorization rule
+    (authorization_profile contains 'Quarantine'). This is the W3 tile source."""
+    from dashboard.models import IoTDevice
+
+    rows = []
+    for d in (IoTDevice.objects.filter(authorization_profile__icontains="quarantine")
+              .order_by("authorization_profile", "mac")):
+        rows.append({
+            "mac": d.mac,
+            "device_type": d.ise_identity_group or d.device_type,
+            "authorization_profile": d.authorization_profile,
+            "endpoint_profile": d.device_type,
+            "site": d.site,
+            "ip": d.ip or "",
+            "last_seen": d.last_seen.isoformat() if d.last_seen else "",
+        })
+    return rows
 
 
 def _onboarded_logical_profiles():
@@ -358,6 +381,16 @@ DATASETS: dict[str, Dataset] = {
             widget="Device type / category",
             description="Profiler profiles (camera, printer, sensor, ...). "
             "Empty if the ERS resource is unavailable on this ISE version.",
+        ),
+        Dataset(
+            key="ise-quarantined",
+            label="Quarantined IoT Devices",
+            source="ISE",
+            fetch=_ise_quarantined,
+            derived=True,
+            widget="Widget 3 - Quarantined / Blocked",
+            description="IoT devices in a QUARANTINE authorization rule "
+            "(authorization profile contains 'Quarantine').",
         ),
         Dataset(
             key="ise-logical-profiles",

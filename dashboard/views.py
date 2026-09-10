@@ -43,7 +43,7 @@ def index(request):
     # atrisk_partial (api/atrisk/) only when the user opens the table. The page
     # itself carries counts/charts (all cheap DB aggregations), no row lists.
     total_devices = analytics.ise_device_count(site=site)  # ISE inventory, site-aware
-    unauthorized = count("ise-unauthorized")
+    quarantined = analytics.quarantined_count(site=site)   # authz rule ~ Quarantine
     trend_all = analytics.trend(hours, site=site)
     severity_all = analytics.attack_severity(hours=hours, site=site)
     leaderboard = analytics.by_device_type(hours=hours, site=site)
@@ -97,7 +97,7 @@ def index(request):
         "widgets": {
             "total_devices": total_devices,
             "at_risk": sum_all["devices_at_risk"],
-            "quarantined": unauthorized,
+            "quarantined": quarantined,
             "threats_window": sum_all["threat_events"],
             "critical": sum_all["critical"],
         },

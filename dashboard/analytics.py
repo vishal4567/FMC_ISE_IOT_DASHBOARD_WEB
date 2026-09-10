@@ -19,7 +19,16 @@ from django.utils import timezone
 from dashboard import event_store
 
 SEVERITY_ORDER = ["Critical", "High", "Medium", "Low", "Informational"]
+# A "threat" counts only Medium severity and above (drop Low / Informational
+# noise). Used consistently for threat counts, devices-at-risk and compliance.
+THREAT_SEVERITIES = ["Critical", "High", "Medium"]
 EVENT_WINDOW_DAYS = 7
+
+
+def _threat_q():
+    """Filter for a real threat event: non-Connection AND severity Medium+."""
+    from django.db.models import Q
+    return ~Q(event_type="Connection") & Q(severity__in=THREAT_SEVERITIES)
 
 
 def _events():
@@ -143,7 +152,7 @@ def devices_at_risk(hours=None, site=None, device_type=None):
 
     rows = (
         _base_qs(hours, site, device_type)
-        .exclude(event_type="Connection")
+        .filter(_threat_q())
         .values("device_mac")
         .annotate(
             event_count=Count("id"),
@@ -187,10 +196,10 @@ def attack_severity(hours=None, site=None, device_type=None):
     from django.db.models import Count
 
     rows = (_base_qs(hours, site, device_type)
-            .exclude(event_type="Connection")
+            .filter(_threat_q())
             .values("severity").annotate(count=Count("id")))
     by = {r["severity"]: r["count"] for r in rows}
-    return [{"severity": s, "count": by.get(s, 0)} for s in SEVERITY_ORDER]
+    return [{"severity": s, "count": by.get(s, 0)} for s in THREAT_SEVERITIES]
 
 
 def trend(hours=24, site=None, device_type=None):
@@ -203,7 +212,7 @@ def trend(hours=24, site=None, device_type=None):
                .values("hour")
                .annotate(
                    bytes_=Sum("total_bytes"),
-                   threats=Count("id", filter=~Q(event_type="Connection")),
+                   threats=Count("id", filter=_threat_q()),
                    blocked=Count("id", filter=Q(action__in=_BLOCK)),
                    allowed=Count("id", filter=~Q(action__in=_BLOCK)),
                ))
@@ -237,10 +246,9 @@ def by_device_type(hours=None, site=None):
             .values("device_type")
             .annotate(
                 devices=Count("device_mac", distinct=True),
-                at_risk=Count("device_mac", distinct=True,
-                              filter=~Q(event_type="Connection")),
+                at_risk=Count("device_mac", distinct=True, filter=_threat_q()),
                 events=Count("id"),
-                threats=Count("id", filter=~Q(event_type="Connection")),
+                threats=Count("id", filter=_threat_q()),
                 critical=Count("id", filter=Q(severity="Critical")
                                & ~Q(event_type="Connection")),
                 blocked=Count("id", filter=Q(action__in=_BLOCK)),
@@ -281,6 +289,17 @@ def _iot_qs(site=None):
 def ise_device_count(site=None):
     """Onboarded IoT device total from the ISE inventory, honoring Site."""
     return _iot_qs(site).count()
+
+
+def quarantined_qs(site=None):
+    """IoT devices in a QUARANTINE authorization rule (authorization_profile
+    holds the RADIUS authorization_rule; a value containing 'Quarantine' marks a
+    quarantined device). Site-aware."""
+    return _iot_qs(site).filter(authorization_profile__icontains="quarantine")
+
+
+def quarantined_count(site=None):
+    return quarantined_qs(site).count()
 
 
 def compliance(hours=None, site=None, device_type=None):
@@ -326,10 +345,9 @@ def summary(hours=None, site=None, device_type=None):
 
     agg = _base_qs(hours, site, device_type).aggregate(
         total_events=Count("id"),
-        threat_events=Count("id", filter=~Q(event_type="Connection")),
+        threat_events=Count("id", filter=_threat_q()),
         blocked=Count("id", filter=Q(action__in=_BLOCK)),
-        devices_at_risk=Count("device_mac", distinct=True,
-                              filter=~Q(event_type="Connection")),
+        devices_at_risk=Count("device_mac", distinct=True, filter=_threat_q()),
         critical=Count("id", filter=Q(severity="Critical")
                        & ~Q(event_type="Connection")),
     )
@@ -437,7 +455,8 @@ def device_360(mac):
         "ise_mac": ise.mac if ise else "",
         "identity_group": (ise.ise_identity_group if ise else "") or "—",
         "profile": (ise.ise_profile if ise else "") or "—",
-        "quarantined": bool(ise and "block" in (ise.ise_identity_group or "").lower()),
+        "quarantined": bool(ise and "quarantine" in
+                            (ise.authorization_profile or "").lower()),
     }
 
     sev_counts = {s: 0 for s in SEVERITY_ORDER}

@@ -56,11 +56,11 @@
     </a>
   </div>
   <div class="col-6 col-lg">
-    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-unauthorized' %}?{{ overall_q }}">
+    <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-quarantined' %}?{{ overall_q }}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W3 · Quarantined / Blocked</div>
         <div class="display-5 fw-bold text-warning">{{ widgets.quarantined }}</div>
-        <div class="small text-muted">ISE blocked / unidentified</div>
+        <div class="small text-muted">In IoT quarantine rule</div>
       </div></div>
     </a>
   </div>
