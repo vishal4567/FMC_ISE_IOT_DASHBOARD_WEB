@@ -53,6 +53,14 @@ case "${1:-}" in
     need_root
     start fastadd "$PY $APP_DIR/manage.py sync_iot_fast --additive"
     ;;
+  authzrule)
+    need_root
+    start authzrule "$PY $APP_DIR/manage.py sync_iot_authz_rule"
+    ;;
+  authzrule-add)
+    need_root
+    start authzruleadd "$PY $APP_DIR/manage.py sync_iot_authz_rule --additive"
+    ;;
   restamp)
     need_root
     start restamp "$PY $APP_DIR/manage.py restamp_sites --events"
@@ -77,7 +85,7 @@ case "${1:-}" in
     systemctl list-units "${PREFIX}-*" --all --no-pager
     ;;
   *)
-    echo "usage: sudo bash $0 {sync|fast|fast-add|restamp|both|status [name]|logs <name>|stop <name>|list}"
+    echo "usage: sudo bash $0 {sync|fast|fast-add|authzrule|authzrule-add|restamp|both|status [name]|logs <name>|stop <name>|list}"
     exit 1
     ;;
 esac

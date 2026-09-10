@@ -133,6 +133,9 @@ def _ise_endpoints():
         rows.append({
             "mac": d.mac,
             "device_type": d.device_type,
+            "authorization_profile": d.authorization_profile,
+            "quarantined": "Yes" if "QUARANTINE" in
+                           (d.authorization_profile or "").upper() else "",
             "endpoint_profile": d.ise_profile,
             "logical_profile": d.logical_profile or d.ise_identity_group,
             "site": d.site,

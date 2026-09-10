@@ -106,6 +106,10 @@ class IoTDevice(models.Model):
     ise_identity_group = models.CharField(max_length=64, blank=True)
     ise_profile = models.CharField(max_length=64, blank=True)
     logical_profile = models.CharField(max_length=128, blank=True)
+    # RADIUS authorization_rule the device matched (e.g. IOT-CCTV,
+    # IOT-Quarantine-Access). Shown as the "Authorization Profile" column; a
+    # value containing "Quarantine" marks a quarantined device.
+    authorization_profile = models.CharField(max_length=128, blank=True)
     correlation = models.CharField(max_length=32, blank=True)  # matched/manual/unmatched
     ise_endpoint_mac = models.CharField(max_length=32, blank=True)
 

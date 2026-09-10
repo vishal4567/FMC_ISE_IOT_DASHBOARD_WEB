@@ -359,6 +359,14 @@ DATACONNECT = {
     # AUTHORIZATION profile name contains a token (default "IOT", any case),
     # instead of filtering endpoints_data by profiling policy.
     "IOT_BY_AUTHZ": _env_bool("ISE_DC_IOT_BY_AUTHZ", False),
+    # IoT discovery by AUTHORIZATION RULE (radius_authentications only - the
+    # summary lacks authorization_rule and framed_ip_address). identity_group ->
+    # device_type; authorization_rule -> the stored "Authorization Profile".
+    "AUTHENTICATIONS_VIEW": os.environ.get("ISE_DC_AUTHENTICATIONS_VIEW", "radius_authentications"),
+    "COL_AUTHZ_RULE": os.environ.get("ISE_DC_COL_AUTHZ_RULE", "authorization_rule"),
+    "COL_IDENTITY_GROUP": os.environ.get("ISE_DC_COL_IDENTITY_GROUP", "identity_group"),
+    "COL_FRAMED_IP": os.environ.get("ISE_DC_COL_FRAMED_IP", "framed_ip_address"),
+    "AUTHZ_RULE_MATCH": os.environ.get("ISE_DC_AUTHZ_RULE_MATCH", "IOT"),
     "COL_AUTHZ": os.environ.get("ISE_DC_COL_AUTHZ", "authorization_profiles"),
     "AUTHZ_MATCH": os.environ.get("ISE_DC_AUTHZ_MATCH", "IOT"),
     "AUTHZ_COL_PROFILE": os.environ.get("ISE_DC_AUTHZ_COL_PROFILE", "endpoint_profile"),

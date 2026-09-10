@@ -404,6 +404,58 @@ class DataConnectClient:
                   f"{len(out)} endpoints")
         return out
 
+    def iot_by_authz_rule(self, *, match="IOT", view="radius_authentications",
+                          mac_col="calling_station_id",
+                          rule_col="authorization_rule",
+                          group_col="identity_group",
+                          ip_col="framed_ip_address",
+                          host_col="device_name", loc_col="location",
+                          time_col="timestamp", days=0, limit=0):
+        """Discover IoT endpoints from the full RADIUS auth log where the
+        AUTHORIZATION RULE name contains ``match`` (e.g. 'IOT', any case). One
+        row per MAC, taking the LATEST auth row per MAC (``MAX(x) KEEP
+        (DENSE_RANK LAST ORDER BY time)``) for its rule / identity_group / ip /
+        NAD / location. ``days`` time-bounds the (full-history) scan.
+
+        Returns dicts in the iot_endpoints() shape, plus:
+          device_type   <- identity_group (the real device class, e.g. Wipro_CCTV)
+          authz_rule     <- authorization_rule (shown as 'Authorization Profile')
+        Site is resolved separately from the NAD ``host``."""
+        def last(col):
+            return f"MAX({col}) KEEP (DENSE_RANK LAST ORDER BY {time_col})"
+
+        window = (f" AND {time_col} >= SYSTIMESTAMP - INTERVAL '{int(days)}' DAY"
+                  if days and time_col else "")
+        sel = [f"{mac_col} AS mac", f"{last(rule_col)} AS rule"]
+        if group_col:
+            sel.append(f"{last(group_col)} AS grp")
+        if ip_col:      # latest IP, else any non-null IP the MAC ever had
+            sel.append(f"COALESCE({last(ip_col)}, MAX({ip_col})) AS ip")
+        if host_col:
+            sel.append(f"{last(host_col)} AS host")
+        if loc_col:
+            sel.append(f"{last(loc_col)} AS location")
+        sql = (f"SELECT {', '.join(sel)} FROM {view} "
+               f"WHERE UPPER({rule_col}) LIKE :m{window} GROUP BY {mac_col}")
+        if limit:
+            sql += f" FETCH FIRST {int(limit)} ROWS ONLY"
+        _, rows = self.query(sql, {"m": f"%{match.upper()}%"})
+        out = []
+        for r in rows:
+            mac = str(r.get("mac") or "").upper()
+            if not mac:
+                continue
+            out.append({
+                "mac": mac,
+                "device_type": r.get("grp", "") or "",     # identity_group
+                "authz_rule": r.get("rule", "") or "",      # authorization_rule
+                "ip": r.get("ip", "") or "",
+                "host": r.get("host", "") or "",
+                "location": _loc_leaf(r.get("location", "")),
+            })
+        self._say(f"[dc] IoT-by-authz-rule ('{match}'): {len(out)} unique MACs")
+        return out
+
     def ip_by_mac(self, macs, *, view="endpoints_data", mac_col="mac_address",
                   ip_col="endpoint_ip"):
         """``{MAC: ip}`` from the endpoints view - used to backfill the device IP
