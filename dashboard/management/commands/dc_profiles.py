@@ -47,21 +47,26 @@ class Command(BaseCommand):
         client = get_dataconnect_client()
         client.log = lambda m: (self.stdout.write(m), self.stdout.flush())
 
-        # (key, header, view, value_col, mac_col)  mac_col="" -> COUNT(*) not DISTINCT MAC
+        # (key, header, view, value_col, mac_col, distinct)
+        #   distinct=True  -> COUNT(DISTINCT mac): views with many rows per MAC
+        #                     (radius summary). distinct=False -> COUNT(*): the
+        #   endpoints_data inventory is already one row per endpoint, so plain
+        #   COUNT(*) is the SAME number and skips the expensive DISTINCT sort.
         specs = [
             ("authz", "AUTHORIZATION PROFILE (radius_authentication_summary)",
-             dc["LOCATION_VIEW"], dc["COL_AUTHZ"], dc["COL_LOC_MAC"]),
+             dc["LOCATION_VIEW"], dc["COL_AUTHZ"], dc["COL_LOC_MAC"], True),
             ("sgt", "SECURITY GROUP (radius_authentication_summary)",
-             dc["LOCATION_VIEW"], "security_group", dc["COL_LOC_MAC"]),
+             dc["LOCATION_VIEW"], "security_group", dc["COL_LOC_MAC"], True),
             ("endpoint", "ENDPOINT / PROFILER POLICY (endpoints_data)",
-             dc["ENDPOINTS_VIEW"], dc["COL_PROFILE"], dc["COL_MAC"]),
+             dc["ENDPOINTS_VIEW"], dc["COL_PROFILE"], dc["COL_MAC"], False),
         ]
 
         with client.session():
-            for key, header, view, col, mac in specs:
+            for key, header, view, col, mac, distinct in specs:
                 if key not in want:
                     continue
-                self._distinct(client, key, header, view, col, mac, match, top, nmacs)
+                self._distinct(client, key, header, view, col, mac, distinct,
+                               match, top, nmacs)
             if "logical" in want:
                 self._logical(client, dc, match, top)
             if "authprof" in want:
@@ -71,10 +76,11 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS("Done - nothing written."))
 
     # ------------------------------------------------------------------ #
-    def _distinct(self, client, key, header, view, col, mac, match, top, nmacs):
+    def _distinct(self, client, key, header, view, col, mac, distinct,
+                  match, top, nmacs):
         self.stdout.write("")
         self.stdout.write(self.style.MIGRATE_HEADING(f"== {header} =="))
-        cnt = f"COUNT(DISTINCT {mac})" if mac else "COUNT(*)"
+        cnt = f"COUNT(DISTINCT {mac})" if (mac and distinct) else "COUNT(*)"
         binds = {"m": f"%{match}%"} if match else {}
         sql = (f"SELECT {col} AS val, {cnt} AS n FROM {view} "
                f"WHERE {col} IS NOT NULL"
@@ -89,7 +95,7 @@ class Command(BaseCommand):
             self.stdout.write("  (none)")
             return
         w = min(60, max([len("VALUE")] + [len(str(r.get("val") or "")) for r in rows]))
-        label = "UNIQUE MACS" if mac else "ROWS"
+        label = "UNIQUE MACS" if (mac and distinct) else "ENDPOINTS"
         self.stdout.write(f"  {'VALUE':<{w}}   {label}")
         self.stdout.write("  " + "-" * (w + 14))
         for r in rows[:top]:
