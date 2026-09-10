@@ -8,6 +8,7 @@ Sweeps four sources (all configurable via settings.DATACONNECT):
   sgt       radius_authentication_summary.security_group          (per MAC)
   endpoint  endpoints_data.endpoint_policy   (profiler/endpoint profiles, per MAC)
   logical   logical_profiles.logical_profile (+ member policies & device count)
+  authprof  authorization_profiles.name  (CONFIG list of authz profiles, no count)
 
     manage.py dc_profiles                 # all sources, all values
     manage.py dc_profiles --match IOT      # only values containing IOT (any case)
@@ -18,7 +19,7 @@ Nothing is written.
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
-SOURCES = ("authz", "sgt", "endpoint", "logical")
+SOURCES = ("authz", "sgt", "endpoint", "logical", "authprof")
 
 
 class Command(BaseCommand):
@@ -63,6 +64,8 @@ class Command(BaseCommand):
                 self._distinct(client, key, header, view, col, mac, match, top, nmacs)
             if "logical" in want:
                 self._logical(client, dc, match, top)
+            if "authprof" in want:
+                self._authprofiles(client, match, top)
 
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS("Done - nothing written."))
@@ -135,3 +138,34 @@ class Command(BaseCommand):
         for r in rows[:top]:
             self.stdout.write(f"  {str(r.get('val') or '')[:w]:<{w}}   {int(r.get('n') or 0):>9,}")
         self.stdout.write(self.style.SUCCESS(f"  {len(rows)} logical profile(s)"))
+
+    def _authprofiles(self, client, match, top):
+        """AUTHORIZATION_PROFILES is the config/definition view (one row per
+        configured authz profile: name + description). No endpoint counts - it
+        lists what EXISTS, not what's in use. Good for confirming candidate
+        names; pair with the endpoint/logical sources for device counts."""
+        self.stdout.write("")
+        self.stdout.write(self.style.MIGRATE_HEADING(
+            "== AUTHORIZATION PROFILE - config (authorization_profiles) =="))
+        where = "WHERE UPPER(name) LIKE :m" if match else ""
+        binds = {"m": f"%{match}%"} if match else {}
+        try:
+            _, rows = client.query(
+                f"SELECT name, description FROM authorization_profiles "
+                f"{where} ORDER BY name", binds)
+        except Exception as exc:
+            self.stdout.write(self.style.ERROR(f"  FAILED: {str(exc)[:140]}"))
+            return
+        if not rows:
+            self.stdout.write("  (none)")
+            return
+        w = min(60, max([len("NAME")] + [len(str(r.get("name") or "")) for r in rows]))
+        self.stdout.write(f"  {'NAME':<{w}}   DESCRIPTION")
+        self.stdout.write("  " + "-" * (w + 20))
+        for r in rows[:top]:
+            self.stdout.write(f"  {str(r.get('name') or '')[:w]:<{w}}   "
+                              f"{str(r.get('description') or '')}")
+        if len(rows) > top:
+            self.stdout.write(f"  ... {len(rows) - top} more")
+        self.stdout.write(self.style.SUCCESS(
+            f"  {len(rows)} configured authz profile(s) (definitions, not counts)"))
