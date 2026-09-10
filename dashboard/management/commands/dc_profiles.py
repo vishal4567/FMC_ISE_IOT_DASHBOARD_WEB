@@ -44,6 +44,18 @@ class Command(BaseCommand):
                             help="time-bound authz/sgt to the last N days (uses "
                                  "COL_LOC_TIME); needed to keep the full "
                                  "radius_authentications scan sane. 0 = all history")
+        parser.add_argument("--cols", nargs="*", default=None,
+                            help="scan THESE columns of --view for distinct values "
+                                 "+ unique-MAC counts (ignores --source). No names "
+                                 "= a default candidate set (authorization_profiles, "
+                                 "security_group, authorization_rule, policy_set_name, "
+                                 "identity_group, endpoint_profile, access_service). "
+                                 "Use to find which column holds the IoT profiles.")
+
+    # candidate columns that could carry an IoT profile/policy/group label
+    CANDIDATE_COLS = ["authorization_profiles", "security_group",
+                      "authorization_rule", "policy_set_name", "identity_group",
+                      "endpoint_profile", "access_service"]
 
     def handle(self, *args, **opts):
         from dashboard.services import get_dataconnect_client
@@ -60,6 +72,24 @@ class Command(BaseCommand):
 
         client = get_dataconnect_client()
         client.log = lambda m: (self.stdout.write(m), self.stdout.flush())
+
+        # --cols mode: run the distinct-value + MAC-count report for each named
+        # (or default candidate) column against the RADIUS view. This is how you
+        # find which column actually holds the IoT authorization profiles.
+        if opts["cols"] is not None:
+            cols = opts["cols"] or self.CANDIDATE_COLS
+            mac = dc["COL_LOC_MAC"]
+            self.stdout.write(self.style.MIGRATE_HEADING(
+                f"Scanning {len(cols)} candidate column(s) of {radius_view}"
+                + (f" for '~{match}'" if match else " (all values)")))
+            with client.session():
+                for col in cols:
+                    self._distinct(client, col, f"{col} ({radius_view})",
+                                   radius_view, col, mac, True, match, top,
+                                   nmacs, window)
+            self.stdout.write("")
+            self.stdout.write(self.style.SUCCESS("Done - nothing written."))
+            return
 
         # (key, header, view, value_col, mac_col, distinct)
         #   distinct=True  -> COUNT(DISTINCT mac): views with many rows per MAC
