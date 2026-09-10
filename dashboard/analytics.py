@@ -243,6 +243,7 @@ def by_device_type(hours=None, site=None):
     from django.db.models import Count, Q, Sum
 
     rows = (_base_qs(hours, site)
+            .exclude(device_type="")   # drop the FMC-only "(unclassified)" bucket
             .values("device_type")
             .annotate(
                 devices=Count("device_mac", distinct=True),

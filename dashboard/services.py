@@ -133,9 +133,8 @@ def _ise_endpoints():
         rows.append({
             "mac": d.mac,
             # device_type column shows the ISE identity group (e.g. Wipro_CCTV);
-            # endpoint_profile is kept separately below.
-            "device_type": d.ise_identity_group or d.device_type,
-            "endpoint_profile_class": d.device_type,
+            # the profiler policy is kept separately as endpoint_profile.
+            "device_type": d.device_type or d.ise_identity_group,
             "authorization_profile": d.authorization_profile,
             "quarantined": "Yes" if "QUARANTINE" in
                            (d.authorization_profile or "").upper() else "",
