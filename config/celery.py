@@ -23,8 +23,8 @@ def setup_periodic_tasks(sender, **kwargs):
                              app.signature("dashboard.tasks.refresh_ise_reference"),
                              name="refresh ISE reference (daily)")
     sender.add_periodic_task(schedule(60 * mins["iot_sync"]),
-                             app.signature("dashboard.tasks.sync_iot_fast"),
-                             name="sync IoT endpoints - fast bulk (hourly)")
+                             app.signature("dashboard.tasks.sync_iot_authz_rule"),
+                             name="sync IoT endpoints - by authorization rule (hourly)")
     sender.add_periodic_task(schedule(60 * mins["config_poll"]),
                              app.signature("dashboard.tasks.snapshot_datasets"),
                              name="snapshot ISE/FMC datasets to DB")

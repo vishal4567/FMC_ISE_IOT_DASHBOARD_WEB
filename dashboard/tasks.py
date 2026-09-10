@@ -517,9 +517,20 @@ def purge_retention() -> dict:
 
 @shared_task(name="dashboard.tasks.sync_iot_fast")
 def sync_iot_fast() -> dict:
-    """Scheduled FAST IoT sync: logical-profile discovery + bulk upsert (refreshes
-    existing devices too). Runs the sync_iot_fast management command in-process."""
+    """DEPRECATED baseline (kept for manual use): logical-profile discovery +
+    bulk upsert. The scheduled baseline is now sync_iot_authz_rule."""
     from django.core.management import call_command
 
     call_command("sync_iot_fast")
+    return {"ok": True}
+
+
+@shared_task(name="dashboard.tasks.sync_iot_authz_rule")
+def sync_iot_authz_rule() -> dict:
+    """Scheduled baseline: discover IoT devices by RADIUS authorization_rule
+    (~IOT) from radius_authentications, bulk upsert into IoTDevice. device_type
+    <- endpoint_profile, authorization_profile <- authorization_rule."""
+    from django.core.management import call_command
+
+    call_command("sync_iot_authz_rule")
     return {"ok": True}

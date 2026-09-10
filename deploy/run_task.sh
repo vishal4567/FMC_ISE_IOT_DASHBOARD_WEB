@@ -65,6 +65,16 @@ case "${1:-}" in
     need_root
     start restamp "$PY $APP_DIR/manage.py restamp_sites --events"
     ;;
+  reenrich)
+    need_root
+    start reenrich "$PY $APP_DIR/manage.py reenrich_events"
+    ;;
+  rebaseline)
+    need_root
+    # new baseline, then re-map all stored events onto it, in one detached job
+    start rebaseline "$PY $APP_DIR/manage.py sync_iot_authz_rule && \
+                      $PY $APP_DIR/manage.py reenrich_events"
+    ;;
   both)
     need_root
     # chain: restamp runs only if sync succeeds, in one detached job
@@ -85,7 +95,7 @@ case "${1:-}" in
     systemctl list-units "${PREFIX}-*" --all --no-pager
     ;;
   *)
-    echo "usage: sudo bash $0 {sync|fast|fast-add|authzrule|authzrule-add|restamp|both|status [name]|logs <name>|stop <name>|list}"
+    echo "usage: sudo bash $0 {sync|fast|fast-add|authzrule|authzrule-add|reenrich|rebaseline|restamp|both|status [name]|logs <name>|stop <name>|list}"
     exit 1
     ;;
 esac
