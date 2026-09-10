@@ -35,6 +35,15 @@ class Command(BaseCommand):
                             help="max rows to print per source (default 50)")
         parser.add_argument("--macs", type=int, default=0,
                             help="also list N sample MACs per value")
+        parser.add_argument("--view", default=None,
+                            help="override the RADIUS view for authz/sgt (e.g. "
+                                 "radius_authentications = full history, not the "
+                                 "current-state summary). Catches devices the "
+                                 "summary drops.")
+        parser.add_argument("--days", type=int, default=0,
+                            help="time-bound authz/sgt to the last N days (uses "
+                                 "COL_LOC_TIME); needed to keep the full "
+                                 "radius_authentications scan sane. 0 = all history")
 
     def handle(self, *args, **opts):
         from dashboard.services import get_dataconnect_client
@@ -43,6 +52,11 @@ class Command(BaseCommand):
         want = set(SOURCES) if "all" in opts["source"] else set(opts["source"])
         match = (opts["match"] or "").upper().strip()
         top, nmacs = opts["top"], opts["macs"]
+        radius_view = opts["view"] or dc["LOCATION_VIEW"]
+        window = ""
+        if opts["days"] and dc["COL_LOC_TIME"]:
+            window = (f" AND {dc['COL_LOC_TIME']} >= SYSTIMESTAMP "
+                      f"- INTERVAL '{int(opts['days'])}' DAY")
 
         client = get_dataconnect_client()
         client.log = lambda m: (self.stdout.write(m), self.stdout.flush())
@@ -52,21 +66,22 @@ class Command(BaseCommand):
         #                     (radius summary). distinct=False -> COUNT(*): the
         #   endpoints_data inventory is already one row per endpoint, so plain
         #   COUNT(*) is the SAME number and skips the expensive DISTINCT sort.
+        # (key, header, view, value_col, mac_col, distinct, window)
         specs = [
-            ("authz", "AUTHORIZATION PROFILE (radius_authentication_summary)",
-             dc["LOCATION_VIEW"], dc["COL_AUTHZ"], dc["COL_LOC_MAC"], True),
-            ("sgt", "SECURITY GROUP (radius_authentication_summary)",
-             dc["LOCATION_VIEW"], "security_group", dc["COL_LOC_MAC"], True),
+            ("authz", f"AUTHORIZATION PROFILE ({radius_view})",
+             radius_view, dc["COL_AUTHZ"], dc["COL_LOC_MAC"], True, window),
+            ("sgt", f"SECURITY GROUP ({radius_view})",
+             radius_view, "security_group", dc["COL_LOC_MAC"], True, window),
             ("endpoint", "ENDPOINT / PROFILER POLICY (endpoints_data)",
-             dc["ENDPOINTS_VIEW"], dc["COL_PROFILE"], dc["COL_MAC"], False),
+             dc["ENDPOINTS_VIEW"], dc["COL_PROFILE"], dc["COL_MAC"], False, ""),
         ]
 
         with client.session():
-            for key, header, view, col, mac, distinct in specs:
+            for key, header, view, col, mac, distinct, win in specs:
                 if key not in want:
                     continue
                 self._distinct(client, key, header, view, col, mac, distinct,
-                               match, top, nmacs)
+                               match, top, nmacs, win)
             if "logical" in want:
                 self._logical(client, dc, match, top)
             if "authprof" in want:
@@ -77,7 +92,7 @@ class Command(BaseCommand):
 
     # ------------------------------------------------------------------ #
     def _distinct(self, client, key, header, view, col, mac, distinct,
-                  match, top, nmacs):
+                  match, top, nmacs, window=""):
         self.stdout.write("")
         self.stdout.write(self.style.MIGRATE_HEADING(f"== {header} =="))
         cnt = f"COUNT(DISTINCT {mac})" if (mac and distinct) else "COUNT(*)"
@@ -85,6 +100,7 @@ class Command(BaseCommand):
         sql = (f"SELECT {col} AS val, {cnt} AS n FROM {view} "
                f"WHERE {col} IS NOT NULL"
                + (f" AND UPPER({col}) LIKE :m" if match else "")
+               + window
                + f" GROUP BY {col} ORDER BY n DESC")
         try:
             _, rows = client.query(sql, binds)
