@@ -37,6 +37,11 @@ class Command(BaseCommand):
                             help="insert only new MACs; keep existing rows")
         parser.add_argument("--limit", type=int, default=0,
                             help="cap discovered MACs (0 = all)")
+        parser.add_argument("--prune", action="store_true",
+                            help="DELETE IoTDevice rows whose MAC is NOT in this "
+                                 "run's discovery, so the baseline becomes exactly "
+                                 "the authz-rule set (removes old-baseline devices). "
+                                 "Refused with --additive/--limit; use full history.")
 
     def handle(self, *args, **opts):
         from dashboard.models import IoTDevice
@@ -47,6 +52,16 @@ class Command(BaseCommand):
         dc = settings.DATACONNECT
         match = opts["match"] or dc.get("AUTHZ_RULE_MATCH", "IOT")
         t0 = time.time()
+
+        if opts["prune"] and (opts["additive"] or opts["limit"]):
+            self.stderr.write(self.style.ERROR(
+                "--prune needs the FULL discovery set; not allowed with "
+                "--additive or --limit."))
+            return
+        if opts["prune"] and opts["days"]:
+            self.stdout.write(self.style.WARNING(
+                f"--prune with --days {opts['days']}: devices that did not "
+                f"authenticate in the last {opts['days']}d will be DELETED."))
 
         client = get_dataconnect_client()
         client.log = lambda m: (self.stdout.write(m), self.stdout.flush())
@@ -131,3 +146,15 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(
             f"\n{'added' if opts['additive'] else 'upserted'} {total:,} devices "
             f"({quarantined:,} quarantined) in {round(time.time()-t0,1)}s"))
+
+        # 4. prune — delete devices not in this run's discovery, so the baseline
+        #    is exactly the authz-rule set (removes old-baseline leftovers).
+        if opts["prune"]:
+            keep = {r["mac"] for r in rows}
+            stale = IoTDevice.objects.exclude(mac__in=keep)
+            n = stale.count()
+            if n:
+                stale.delete()
+            self.stdout.write(self.style.SUCCESS(
+                f"pruned {n:,} device(s) not in the current authz-rule baseline "
+                f"(kept {len(keep):,})"))
