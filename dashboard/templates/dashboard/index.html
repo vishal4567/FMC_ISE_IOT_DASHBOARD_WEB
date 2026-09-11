@@ -97,7 +97,12 @@
 <div class="row g-3 mb-4">
   <div class="col-lg-4">
     <div class="card shadow-sm h-100"><div class="card-body">
-      <h6 class="card-title">Attack Severity <span class="text-muted small">(Widget 5 · {{ filters.range }})</span></h6>
+      <h6 class="card-title">Attack Severity <span class="text-muted small">(Widget 5 · {{ filters.range }})</span>
+        <div class="btn-group btn-group-sm float-end" role="group">
+          <button type="button" class="btn btn-outline-secondary active" onclick="sevToggle('sevAll','doughnut',this)">Pie</button>
+          <button type="button" class="btn btn-outline-secondary" onclick="sevToggle('sevAll','bar',this)">Bar</button>
+        </div>
+      </h6>
       <canvas id="sevAll" height="220"></canvas>
     </div></div>
   </div>
@@ -241,7 +246,12 @@
   <div class="row g-3 mb-3">
     <div class="col-lg-4">
       <div class="card shadow-sm h-100"><div class="card-body">
-        <h6 class="card-title">Attack Severity — {{ selected_type }}</h6>
+        <h6 class="card-title">Attack Severity — {{ selected_type }}
+          <div class="btn-group btn-group-sm float-end" role="group">
+            <button type="button" class="btn btn-outline-secondary active" onclick="sevToggle('sevType','doughnut',this)">Pie</button>
+            <button type="button" class="btn btn-outline-secondary" onclick="sevToggle('sevType','bar',this)">Bar</button>
+          </div>
+        </h6>
         <canvas id="sevType" height="220"></canvas>
       </div></div>
     </div>
@@ -272,12 +282,30 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <script>
   const sevColors = {Critical:'#dc3545',High:'#fd7e14',Medium:'#0dcaf0',Low:'#6c757d',Informational:'#adb5bd'};
-  function donut(id, data){
+  const sevCharts = {};   // canvas id -> Chart instance
+  const sevStore = {};    // canvas id -> data
+  function renderSev(id, kind){
     const el = document.getElementById(id); if(!el) return;
-    new Chart(el, { type:'doughnut',
-      data:{ labels:data.map(s=>s.severity),
-        datasets:[{ data:data.map(s=>s.count), backgroundColor:data.map(s=>sevColors[s.severity]) }] },
-      options:{ plugins:{ legend:{ position:'bottom' } } } });
+    const data = sevStore[id] || [];
+    if(sevCharts[id]) sevCharts[id].destroy();
+    const labels = data.map(s=>s.severity);
+    const vals = data.map(s=>s.count);
+    const colors = data.map(s=>sevColors[s.severity]);
+    const cfg = kind==='bar'
+      ? { type:'bar',
+          data:{ labels, datasets:[{ label:'Events', data:vals, backgroundColor:colors }] },
+          options:{ plugins:{ legend:{ display:false } },
+                    scales:{ y:{ beginAtZero:true } } } }
+      : { type:'doughnut',
+          data:{ labels, datasets:[{ data:vals, backgroundColor:colors }] },
+          options:{ plugins:{ legend:{ position:'bottom' } } } };
+    sevCharts[id] = new Chart(el, cfg);
+  }
+  function donut(id, data){ sevStore[id]=data; renderSev(id,'doughnut'); }
+  function sevToggle(id, kind, btn){
+    renderSev(id, kind);
+    if(btn){ btn.parentElement.querySelectorAll('button')
+      .forEach(b=>b.classList.remove('active')); btn.classList.add('active'); }
   }
   function trend(id, points){
     const el = document.getElementById(id); if(!el) return;
