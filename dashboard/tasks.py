@@ -506,12 +506,13 @@ def rollup_hourly() -> dict:
 
 @shared_task(name="dashboard.tasks.purge_retention")
 def purge_retention() -> dict:
-    from django.conf import settings
     from dashboard import event_store
+    from dashboard.models import AppSetting
 
+    # editable in the in-app Config page; default 7 days for both.
     return event_store.purge_old(
-        threat_days=settings.RETENTION_THREAT_DAYS,
-        connection_days=settings.RETENTION_CONNECTION_DAYS,
+        threat_days=AppSetting.get_int("retention_threat_days", 7),
+        connection_days=AppSetting.get_int("retention_connection_days", 7),
     )
 
 

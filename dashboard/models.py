@@ -155,3 +155,27 @@ class SiteCode(models.Model):
 
     def __str__(self):
         return f"{self.code} -> {self.site}"
+
+
+class AppSetting(models.Model):
+    """Editable key/value app settings (managed from the in-app Config page), so
+    operational knobs like event retention can be changed without a redeploy."""
+
+    key = models.CharField(max_length=64, unique=True)
+    value = models.CharField(max_length=255, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.key}={self.value}"
+
+    @classmethod
+    def get_int(cls, key, default):
+        row = cls.objects.filter(key=key).first()
+        try:
+            return int(row.value) if row and row.value != "" else int(default)
+        except (TypeError, ValueError):
+            return int(default)
+
+    @classmethod
+    def set(cls, key, value):
+        cls.objects.update_or_create(key=key, defaults={"value": str(value)})

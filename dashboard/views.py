@@ -391,3 +391,30 @@ def config_sites(request):
         "test_result": test_result,
     }
     return render(request, "dashboard/config_sites.html", context)
+
+
+@admin_required
+def config_settings(request):
+    """In-app admin config: operational settings (event retention days). Stored
+    in AppSetting so the purge task reads them without a redeploy."""
+    from dashboard.models import AppSetting, SecurityEvent
+
+    keys = {"retention_threat_days": 7, "retention_connection_days": 7}
+    if request.method == "POST":
+        for k in keys:
+            raw = (request.POST.get(k) or "").strip()
+            try:
+                v = int(raw)
+                if 1 <= v <= 3650:
+                    AppSetting.set(k, v)
+            except ValueError:
+                pass
+        return redirect(f"{request.path}?msg=Saved.")
+
+    context = {
+        "msg": request.GET.get("msg"),
+        "retention_threat_days": AppSetting.get_int("retention_threat_days", 7),
+        "retention_connection_days": AppSetting.get_int("retention_connection_days", 7),
+        "event_count": SecurityEvent.objects.count(),
+    }
+    return render(request, "dashboard/config_settings.html", context)

@@ -1,0 +1,47 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Config · Settings{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+  <h4 class="mb-0">⚙ Settings</h4>
+</div>
+
+{% if msg %}<div class="alert alert-success py-2">{{ msg }}</div>{% endif %}
+
+<div class="card shadow-sm mb-3" style="max-width:640px">
+  <div class="card-body">
+    <h6 class="card-title">Event retention</h6>
+    <p class="text-muted small mb-3">
+      How long FMC events are kept before the retention purge deletes them. The
+      dashboard analytics window is 7 days, so 7 is the recommended value.
+      Applies on the next scheduled purge (every 12h) or when you run
+      <code>run_task.sh purge</code>. Current stored events:
+      <strong>{{ event_count|default:0 }}</strong>.
+    </p>
+    <form method="post" class="row g-3">
+      {% csrf_token %}
+      <div class="col-sm-6">
+        <label class="form-label small fw-semibold">Threat events (days)</label>
+        <input type="number" name="retention_threat_days" min="1" max="3650"
+               class="form-control" value="{{ retention_threat_days }}">
+        <div class="form-text">Intrusion / Malware / SI / File events.</div>
+      </div>
+      <div class="col-sm-6">
+        <label class="form-label small fw-semibold">Connection events (days)</label>
+        <input type="number" name="retention_connection_days" min="1" max="3650"
+               class="form-control" value="{{ retention_connection_days }}">
+        <div class="form-text">Connection flow events (the bulk of the volume).</div>
+      </div>
+      <div class="col-12">
+        <button class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<p class="text-muted small" style="max-width:640px">
+  Saving only changes the retention policy; it does not delete immediately.
+  To purge now on a large table, run detached:
+  <code>sudo bash deploy/run_task.sh purge {{ retention_connection_days }}</code>.
+</p>
+{% endblock %}
