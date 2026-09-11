@@ -292,6 +292,19 @@ def _live_filtered(key, request):
     if key == "sim-devices-at-risk":
         from dashboard import analytics
         return analytics.devices_at_risk(hours=hours, site=site, device_type=dtype)
+
+    if key == "sim-events":
+        # Query SecurityEvent live with the SAME filters as the dashboard (site /
+        # type / time / severity / threats), so a click-through table shows the
+        # ACTUAL matching events - not a filtered slice of a capped snapshot.
+        from dashboard import analytics, event_store
+        qs = analytics._base_qs(hours=hours, site=site, device_type=dtype)
+        sev = (request.GET.get("severity") or "").strip()
+        if sev:
+            qs = qs.filter(severity=sev)
+        if request.GET.get("threats") == "1":
+            qs = qs.filter(analytics._threat_q())
+        return [event_store._to_dict(e) for e in qs.order_by("-ts")[:2000]]
     return None
 
 
