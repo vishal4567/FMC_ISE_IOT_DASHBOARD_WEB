@@ -14,7 +14,9 @@
   <link rel="stylesheet" href="{% static 'dashboard/app.css' %}">
   <style>
     :root { --sb-w: 240px; --sb-w-collapsed: 64px; --sb-bg:#1f2733; --sb-fg:#c7d0db; }
-    body { margin:0; }
+    /* theme-aware page background (overrides the hardcoded gray in app.css) */
+    body { margin:0; background:#f4f6f9; }
+    :root[data-bs-theme="dark"] body { background:#0f141b; }
     .layout { display:flex; min-height:100vh; }
     /* ---- sidebar ---- */
     .sidebar {
