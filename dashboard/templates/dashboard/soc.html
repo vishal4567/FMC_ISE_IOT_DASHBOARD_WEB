@@ -116,6 +116,38 @@
     </div>
   </div>
 
+  <!-- correlation + top devices at risk (overview) -->
+  <div class="row g-3 mb-3">
+    <div class="col-lg-8">
+      <div class="panel">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="sec mb-0">Top devices at risk</h6>
+          <a class="btn btn-sm btn-outline-secondary" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ overall_q }}">Full report</a>
+        </div>
+        <div class="js-lazy-table"
+             data-url="{% url 'dashboard:atrisk_partial' %}?site={{ filters.site|urlencode }}&range={{ filters.range }}">
+          <div class="text-center py-3">
+            <button type="button" class="btn btn-outline-primary btn-sm js-load-btn">↓ Load at-risk devices</button>
+            <div class="small text-secondary mt-1">{{ widgets.at_risk }} device(s) at risk · click to view</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="col-lg-4">
+      <div class="panel text-center h-100">
+        <h6 class="sec mb-2">ISE ↔ FMC correlation</h6>
+        <div style="font-size:2.4rem;font-weight:700;line-height:1;color:var(--acc-green)">{{ correlation.match_rate }}%</div>
+        <div class="small text-secondary mb-3">of FMC devices enrolled in ISE</div>
+        <div class="d-flex justify-content-around">
+          <div><div class="h5 mb-0" style="color:var(--acc-green)">{{ correlation.matched }}</div><div class="small text-secondary">Matched</div></div>
+          <div><div class="h5 mb-0 text-secondary">{{ correlation.unmatched }}</div><div class="small text-secondary">FMC-only</div></div>
+          <div><div class="h5 mb-0">{{ correlation.total }}</div><div class="small text-secondary">Total</div></div>
+        </div>
+        <a href="{% url 'dashboard:mapping' %}" class="btn btn-sm btn-primary mt-3">Open mapping →</a>
+      </div>
+    </div>
+  </div>
+
   <!-- ===== Device-type focus (Dashboard 2) ===== -->
   {% if selected_type %}
   <div class="panel mb-3">
@@ -174,6 +206,17 @@
       <div class="col-lg-8">
         <h6 class="sec">Trend — {{ selected_type }}</h6>
         <canvas id="trendSocType" height="110"></canvas>
+      </div>
+    </div>
+
+    <div class="mt-3">
+      <h6 class="sec mb-2">Top {{ selected_type }} devices at risk</h6>
+      <div class="js-lazy-table"
+           data-url="{% url 'dashboard:atrisk_partial' %}?site={{ filters.site|urlencode }}&range={{ filters.range }}&type={{ selected_type|urlencode }}">
+        <div class="text-center py-3">
+          <button type="button" class="btn btn-outline-primary btn-sm js-load-btn">↓ Load {{ selected_type }} devices at risk</button>
+          <div class="small text-secondary mt-1">{{ type_metrics.at_risk }} device(s) at risk · click to view</div>
+        </div>
       </div>
     </div>
   </div>
@@ -246,5 +289,19 @@
   renderSev('sevSocType','doughnut');
   soctrend('trendSocType', {{ type_trend_json|safe }});
   {% endif %}
+
+  // at-risk device tables stream in on click (page stays numbers-only)
+  document.querySelectorAll('.js-lazy-table').forEach(function(box){
+    var btn = box.querySelector('.js-load-btn');
+    if(!btn) return;
+    btn.addEventListener('click', function(){
+      var url = box.getAttribute('data-url');
+      box.innerHTML = '<div class="text-center py-3 text-secondary">Loading…</div>';
+      fetch(url, {headers:{'X-Requested-With':'XMLHttpRequest'}})
+        .then(function(r){ return r.text(); })
+        .then(function(html){ box.innerHTML = html; })
+        .catch(function(){ box.innerHTML = '<div class="text-danger small p-2">Failed to load devices.</div>'; });
+    });
+  });
 </script>
 {% endblock %}
