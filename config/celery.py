@@ -13,6 +13,13 @@ app = Celery("iotdash")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks(["dashboard"])
 
+# Register task-run signal handlers (records executions to TaskRun for the
+# admin Activity page). Import for side effects; safe if it can't load.
+try:
+    import dashboard.tasksignals  # noqa: F401
+except Exception:
+    pass
+
 
 @app.on_after_finalize.connect
 def setup_periodic_tasks(sender, **kwargs):

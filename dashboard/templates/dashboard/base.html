@@ -97,6 +97,10 @@
         <span class="ico">⚙️</span><span class="label">Settings</span></a>
       <a class="nav-link {% if url == 'config_users' %}active{% endif %}" href="{% url 'dashboard:config_users' %}" title="Users">
         <span class="ico">👥</span><span class="label">Users</span></a>
+      <a class="nav-link {% if url == 'config_audit' %}active{% endif %}" href="{% url 'dashboard:config_audit' %}" title="Audit Trail">
+        <span class="ico">📝</span><span class="label">Audit Trail</span></a>
+      <a class="nav-link {% if url == 'config_activity' %}active{% endif %}" href="{% url 'dashboard:config_activity' %}" title="Activity">
+        <span class="ico">📈</span><span class="label">Activity</span></a>
       {% endif %}
 
       {% if user.is_authenticated %}

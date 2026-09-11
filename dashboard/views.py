@@ -377,6 +377,7 @@ def _stringify(value):
 def config_sites(request):
     """In-app admin config: manage the NAD-hostname -> site mapping (SiteCode).
     Add / edit / delete / enable rows, and test a hostname against the map."""
+    from dashboard import audit
     from dashboard.models import SiteCode
     from dashboard.site_mapping import db_site_matcher
     from integrations.location_map import site_from_hostname
@@ -389,8 +390,12 @@ def config_sites(request):
         if action == "add" and code and site:
             SiteCode.objects.update_or_create(
                 code=code, defaults={"site": site, "active": True})
+            audit.log(request, "site.add", code, site)
         elif action == "delete" and rid:
+            row = SiteCode.objects.filter(id=rid).first()
             SiteCode.objects.filter(id=rid).delete()
+            if row:
+                audit.log(request, "site.delete", row.code, row.site)
         elif action == "toggle" and rid:
             row = SiteCode.objects.filter(id=rid).first()
             if row:
@@ -404,6 +409,7 @@ def config_sites(request):
                 if site:
                     row.site = site
                 row.save(update_fields=["code", "site", "updated_at"])
+                audit.log(request, "site.edit", row.code, row.site)
         return redirect("dashboard:config_sites")
 
     test_host = (request.GET.get("test") or "").strip()
@@ -422,18 +428,23 @@ def config_sites(request):
 def config_settings(request):
     """In-app admin config: operational settings (event retention days). Stored
     in AppSetting so the purge task reads them without a redeploy."""
+    from dashboard import audit
     from dashboard.models import AppSetting, SecurityEvent
 
     keys = {"retention_threat_days": 7, "retention_connection_days": 7}
     if request.method == "POST":
+        changed = []
         for k in keys:
             raw = (request.POST.get(k) or "").strip()
             try:
                 v = int(raw)
                 if 1 <= v <= 3650:
                     AppSetting.set(k, v)
+                    changed.append(f"{k}={v}")
             except ValueError:
                 pass
+        if changed:
+            audit.log(request, "settings.update", "retention", ", ".join(changed))
         return redirect(f"{request.path}?msg=Saved.")
 
     context = {
@@ -452,6 +463,8 @@ def config_users(request):
     from django.contrib.auth import get_user_model
     from django.contrib.auth.password_validation import validate_password
     from django.core.exceptions import ValidationError
+
+    from dashboard import audit
 
     User = get_user_model()
 
@@ -482,6 +495,8 @@ def config_users(request):
             u = User(username=username, is_staff=make_admin, is_active=True)
             u.set_password(password)
             u.save()
+            audit.log(request, "user.add", username,
+                      "admin" if make_admin else "viewer")
             return redir(msg=f"Created {'admin' if make_admin else 'viewer'} '{username}'.")
 
         if not target:
@@ -494,6 +509,7 @@ def config_users(request):
                 return redir(err="Cannot delete the last admin.")
             name = target.username
             target.delete()
+            audit.log(request, "user.delete", name)
             return redir(msg=f"Deleted '{name}'.")
 
         if action == "role":
@@ -504,6 +520,8 @@ def config_users(request):
                 return redir(err="Cannot demote the last admin.")
             target.is_staff = make_admin
             target.save(update_fields=["is_staff"])
+            audit.log(request, "user.role", target.username,
+                      "admin" if make_admin else "viewer")
             return redir(msg=f"{target.username} is now {'admin' if make_admin else 'viewer'}.")
 
         if action == "reset":
@@ -514,6 +532,7 @@ def config_users(request):
                 return redir(err="Password: " + " ".join(e.messages))
             target.set_password(password)
             target.save(update_fields=["password"])
+            audit.log(request, "user.reset_password", target.username)
             return redir(msg=f"Password reset for '{target.username}'.")
 
         if action == "toggle_active":
@@ -521,6 +540,8 @@ def config_users(request):
                 return redir(err="You cannot deactivate your own account.")
             target.is_active = not target.is_active
             target.save(update_fields=["is_active"])
+            audit.log(request, "user.toggle_active", target.username,
+                      "active" if target.is_active else "disabled")
             return redir(msg=f"{target.username} {'activated' if target.is_active else 'deactivated'}.")
 
         return redir(err="Unknown action.")
@@ -531,3 +552,36 @@ def config_users(request):
         "users": User.objects.order_by("-is_staff", "username"),
     }
     return render(request, "dashboard/config_users.html", context)
+
+
+@admin_required
+def config_audit(request):
+    """Admin-only audit trail of configuration changes."""
+    from dashboard.models import AuditLog
+
+    q = (request.GET.get("q") or "").strip()
+    rows = AuditLog.objects.all()
+    if q:
+        from django.db.models import Q
+        rows = rows.filter(Q(username__icontains=q) | Q(action__icontains=q)
+                           | Q(target__icontains=q) | Q(detail__icontains=q))
+    return render(request, "dashboard/config_audit.html",
+                  {"rows": rows[:400], "q": q})
+
+
+@admin_required
+def config_activity(request):
+    """Admin-only activity log of scheduled/background task runs."""
+    from dashboard.models import TaskRun
+
+    rows = TaskRun.objects.all()[:300]
+    # quick stats over the recent window shown
+    recent = list(rows)
+    stats = {
+        "total": len(recent),
+        "success": sum(1 for r in recent if r.status == "success"),
+        "failure": sum(1 for r in recent if r.status == "failure"),
+        "running": sum(1 for r in recent if r.finished is None),
+    }
+    return render(request, "dashboard/config_activity.html",
+                  {"rows": recent, "stats": stats})

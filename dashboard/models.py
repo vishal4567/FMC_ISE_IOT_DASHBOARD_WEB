@@ -179,3 +179,39 @@ class AppSetting(models.Model):
     @classmethod
     def set(cls, key, value):
         cls.objects.update_or_create(key=key, defaults={"value": str(value)})
+
+
+class AuditLog(models.Model):
+    """Who changed what, when - one row per config mutation (users, site mapping,
+    settings). Shown on the admin Audit Trail page."""
+
+    ts = models.DateTimeField(auto_now_add=True, db_index=True)
+    username = models.CharField(max_length=150, blank=True)
+    action = models.CharField(max_length=64, db_index=True)  # e.g. user.add
+    target = models.CharField(max_length=200, blank=True)
+    detail = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ["-ts"]
+
+    def __str__(self):
+        return f"{self.ts:%Y-%m-%d %H:%M} {self.username} {self.action}"
+
+
+class TaskRun(models.Model):
+    """One scheduled/background task execution (Celery), recorded via task
+    signals. Shown on the admin Activity page."""
+
+    task_id = models.CharField(max_length=64, db_index=True, blank=True)
+    name = models.CharField(max_length=120, db_index=True)
+    status = models.CharField(max_length=16, default="started")  # started/success/failure
+    started = models.DateTimeField(auto_now_add=True, db_index=True)
+    finished = models.DateTimeField(null=True, blank=True)
+    runtime_ms = models.IntegerField(null=True, blank=True)
+    detail = models.CharField(max_length=500, blank=True)
+
+    class Meta:
+        ordering = ["-started"]
+
+    def __str__(self):
+        return f"{self.name} [{self.status}]"

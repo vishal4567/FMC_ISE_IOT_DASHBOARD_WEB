@@ -1,0 +1,56 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Activity · Scheduler Runs{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+  <h4 class="mb-0">📈 Activity</h4>
+  <span class="text-muted small ms-2">scheduled &amp; background task runs</span>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-6 col-md-3"><div class="card shadow-sm h-100"><div class="card-body text-center">
+    <div class="text-muted small text-uppercase">Runs shown</div>
+    <div class="h3 mb-0">{{ stats.total }}</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card shadow-sm h-100"><div class="card-body text-center">
+    <div class="text-muted small text-uppercase">Success</div>
+    <div class="h3 mb-0 text-success">{{ stats.success }}</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card shadow-sm h-100"><div class="card-body text-center">
+    <div class="text-muted small text-uppercase">Failure</div>
+    <div class="h3 mb-0 text-danger">{{ stats.failure }}</div></div></div></div>
+  <div class="col-6 col-md-3"><div class="card shadow-sm h-100"><div class="card-body text-center">
+    <div class="text-muted small text-uppercase">Running</div>
+    <div class="h3 mb-0 text-warning">{{ stats.running }}</div></div></div></div>
+</div>
+
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead class="table-dark">
+        <tr><th>Started</th><th>Task</th><th>Status</th><th class="text-end">Runtime</th><th>Result</th></tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td class="small text-muted text-nowrap">{{ r.started|date:"Y-m-d H:i:s" }}</td>
+          <td class="fw-semibold small">{{ r.name }}</td>
+          <td>
+            {% if r.status == "success" %}<span class="badge bg-success">success</span>
+            {% elif r.status == "failure" %}<span class="badge bg-danger">failure</span>
+            {% elif r.finished is None %}<span class="badge bg-warning text-dark">running</span>
+            {% else %}<span class="badge bg-secondary">{{ r.status }}</span>{% endif %}
+          </td>
+          <td class="text-end small text-nowrap">
+            {% if r.runtime_ms is not None %}{{ r.runtime_ms }} ms{% else %}—{% endif %}
+          </td>
+          <td class="small text-muted text-truncate" style="max-width:420px">{{ r.detail }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="5" class="text-center text-muted py-3">
+          No task runs recorded yet. They appear once the Celery worker runs a
+          scheduled task (needs the Redis broker + worker/beat running).</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
