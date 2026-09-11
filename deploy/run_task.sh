@@ -71,7 +71,7 @@ case "${1:-}" in
     ;;
   purge)
     need_root
-    start purge "$PY $APP_DIR/manage.py purge_events --days ${2:-7}"
+    start purge "$PY $APP_DIR/manage.py purge_events --days ${2:-7} --batch ${3:-200000}"
     ;;
   rebaseline)
     need_root
