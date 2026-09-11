@@ -119,16 +119,14 @@
   <!-- ===== Device-type focus (Dashboard 2) ===== -->
   {% if selected_type %}
   <div class="panel mb-3">
-    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
-      <h6 class="sec mb-0">Device-type focus</h6>
-      <form method="get" class="d-flex align-items-center gap-2 ms-auto">
-        <input type="hidden" name="site" value="{{ filters.site }}">
-        <input type="hidden" name="range" value="{{ filters.range }}">
-        <label class="small text-secondary mb-0">Type</label>
-        <select name="type" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
-          {% for ty in types %}<option value="{{ ty }}" {% if ty == selected_type %}selected{% endif %}>{{ ty }}</option>{% endfor %}
-        </select>
-      </form>
+    <div class="mb-3">
+      <h6 class="sec mb-2">Device-type focus</h6>
+      <div class="d-flex flex-wrap gap-1">
+        {% for ty in types %}
+        <a class="btn btn-sm {% if ty == selected_type %}btn-primary{% else %}btn-outline-secondary{% endif %}"
+           href="?site={{ filters.site|urlencode }}&amp;range={{ filters.range }}&amp;type={{ ty|urlencode }}">{{ ty }}</a>
+        {% endfor %}
+      </div>
     </div>
 
     <div class="row g-2 mb-3">
