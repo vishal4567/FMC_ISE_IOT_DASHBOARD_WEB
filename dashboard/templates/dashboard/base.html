@@ -10,58 +10,152 @@
   <link rel="stylesheet"
         href="https://cdn.datatables.net/1.13.8/css/dataTables.bootstrap5.min.css">
   <link rel="stylesheet" href="{% static 'dashboard/app.css' %}">
+  <style>
+    :root { --sb-w: 240px; --sb-w-collapsed: 64px; --sb-bg:#1f2733; --sb-fg:#c7d0db; }
+    body { margin:0; }
+    .layout { display:flex; min-height:100vh; }
+    /* ---- sidebar ---- */
+    .sidebar {
+      width:var(--sb-w); flex:0 0 var(--sb-w); background:var(--sb-bg);
+      color:var(--sb-fg); display:flex; flex-direction:column; position:sticky;
+      top:0; height:100vh; transition:width .18s ease, flex-basis .18s ease;
+      overflow-x:hidden;
+    }
+    .sidebar .brand {
+      display:flex; align-items:center; gap:.6rem; padding:16px 18px;
+      color:#fff; font-weight:700; white-space:nowrap; text-decoration:none;
+      border-bottom:1px solid rgba(255,255,255,.08);
+    }
+    .sidebar .brand .ico { font-size:1.4rem; }
+    .sidebar .sect {
+      font-size:.66rem; letter-spacing:.08em; text-transform:uppercase;
+      color:#6b7889; padding:16px 18px 6px; white-space:nowrap;
+    }
+    .sidebar .nav-link {
+      display:flex; align-items:center; gap:.75rem; padding:9px 18px;
+      color:var(--sb-fg); white-space:nowrap; border-left:3px solid transparent;
+    }
+    .sidebar .nav-link .ico { width:22px; text-align:center; font-size:1.05rem; flex:0 0 22px; }
+    .sidebar .nav-link:hover { background:rgba(255,255,255,.06); color:#fff; }
+    .sidebar .nav-link.active {
+      background:rgba(13,202,240,.14); color:#fff; border-left-color:#0dcaf0;
+    }
+    .sidebar .foot { margin-top:auto; padding:14px 18px; border-top:1px solid rgba(255,255,255,.08); white-space:nowrap; }
+    /* collapsed rail */
+    .layout.collapsed .sidebar { width:var(--sb-w-collapsed); flex-basis:var(--sb-w-collapsed); }
+    .layout.collapsed .sidebar .label,
+    .layout.collapsed .sidebar .sect,
+    .layout.collapsed .sidebar .brand span,
+    .layout.collapsed .sidebar .foot .meta { display:none; }
+    .layout.collapsed .sidebar .nav-link { justify-content:center; padding:11px 0; gap:0; }
+    /* ---- main ---- */
+    .main { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; }
+    .topbar {
+      position:sticky; top:0; z-index:20; display:flex; align-items:center;
+      gap:12px; padding:10px 16px; background:#fff;
+      border-bottom:1px solid #e6e8eb;
+    }
+    .topbar .toggle { border:none; background:transparent; font-size:1.25rem;
+      line-height:1; cursor:pointer; color:#495057; }
+    .content { padding:20px; flex:1 1 auto; }
+    /* ---- mobile: off-canvas ---- */
+    @media (max-width: 768px) {
+      .sidebar { position:fixed; z-index:1050; transform:translateX(-100%); }
+      .layout.mobile-open .sidebar { transform:translateX(0); }
+      .layout.collapsed .sidebar { width:var(--sb-w); flex-basis:var(--sb-w); }
+      .layout.collapsed .sidebar .label,
+      .layout.collapsed .sidebar .sect,
+      .layout.collapsed .sidebar .brand span { display:inline; }
+      .backdrop { display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:1040; }
+      .layout.mobile-open .backdrop { display:block; }
+    }
+  </style>
 </head>
 <body>
-  <nav class="navbar navbar-expand navbar-dark bg-dark px-3">
-    <a class="navbar-brand" href="{% url 'dashboard:index' %}">
-      🛡️ IoT Security Dashboard
-    </a>
-    <ul class="navbar-nav me-auto">
-      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:index' %}">Dashboard</a></li>
-      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:mapping' %}">ISE ↔ FMC Mapping</a></li>
-      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:reports' %}">Reports</a></li>
-      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:readiness' %}">Policy Readiness</a></li>
+  {% with url=request.resolver_match.url_name %}
+  <div class="layout" id="layout">
+    <aside class="sidebar">
+      <a class="brand" href="{% url 'dashboard:index' %}">
+        <span class="ico">🛡️</span><span>IoT Security</span>
+      </a>
+
+      <div class="sect">Monitor</div>
+      <a class="nav-link {% if url == 'index' %}active{% endif %}" href="{% url 'dashboard:index' %}" title="Dashboard">
+        <span class="ico">📊</span><span class="label">Dashboard</span></a>
+      <a class="nav-link {% if url == 'mapping' %}active{% endif %}" href="{% url 'dashboard:mapping' %}" title="ISE ↔ FMC Mapping">
+        <span class="ico">🔗</span><span class="label">ISE ↔ FMC Mapping</span></a>
+      <a class="nav-link {% if url == 'reports' %}active{% endif %}" href="{% url 'dashboard:reports' %}" title="Reports">
+        <span class="ico">📄</span><span class="label">Reports</span></a>
+      <a class="nav-link {% if url == 'readiness' %}active{% endif %}" href="{% url 'dashboard:readiness' %}" title="Policy Readiness">
+        <span class="ico">🛡️</span><span class="label">Policy Readiness</span></a>
+
       {% if user.is_staff %}
-      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:config_sites' %}">⚙ Config</a></li>
-      <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:config_settings' %}">⚙ Settings</a></li>
+      <div class="sect">Admin</div>
+      <a class="nav-link {% if url == 'config_sites' %}active{% endif %}" href="{% url 'dashboard:config_sites' %}" title="Site Mapping">
+        <span class="ico">🗺️</span><span class="label">Site Mapping</span></a>
+      <a class="nav-link {% if url == 'config_settings' %}active{% endif %}" href="{% url 'dashboard:config_settings' %}" title="Settings">
+        <span class="ico">⚙️</span><span class="label">Settings</span></a>
       {% endif %}
-    </ul>
-    <form class="d-flex" role="search" action="{% url 'dashboard:device_search' %}" method="get">
-      <input class="form-control form-control-sm" type="search" name="q"
-             list="nav-device-options" autocomplete="off"
-             placeholder="🔍 Device MAC / IP / hostname → 360"
-             style="min-width:270px" value="{{ request.GET.q }}">
-      <button class="btn btn-sm btn-outline-light ms-1" type="submit">Search</button>
-    </form>
-    <datalist id="nav-device-options">
-      {% for o in nav_device_options %}<option value="{{ o }}">{% endfor %}
-    </datalist>
-    {% if user.is_authenticated %}
-    <div class="d-flex align-items-center ms-3 text-light">
-      <span class="small me-2">👤 {{ user.username }}
-        <span class="badge {% if user.is_staff %}bg-info text-dark{% else %}bg-secondary{% endif %} ms-1">{% if user.is_staff %}admin{% else %}viewer{% endif %}</span>
-      </span>
-      <form method="post" action="{% url 'dashboard:logout' %}" class="m-0">
-        {% csrf_token %}
-        <button class="btn btn-sm btn-outline-light" type="submit">Logout</button>
-      </form>
+
+      {% if user.is_authenticated %}
+      <div class="foot">
+        <div class="meta small mb-2">👤 {{ user.username }}
+          <span class="badge {% if user.is_staff %}bg-info text-dark{% else %}bg-secondary{% endif %}">{% if user.is_staff %}admin{% else %}viewer{% endif %}</span>
+        </div>
+        <form method="post" action="{% url 'dashboard:logout' %}" class="m-0">
+          {% csrf_token %}
+          <button class="btn btn-sm btn-outline-light w-100" type="submit" title="Logout">⎋ <span class="label">Logout</span></button>
+        </form>
+      </div>
+      {% endif %}
+    </aside>
+    <div class="backdrop" onclick="document.getElementById('layout').classList.remove('mobile-open')"></div>
+
+    <div class="main">
+      <header class="topbar">
+        <button class="toggle" id="sbToggle" title="Toggle sidebar">☰</button>
+        <form class="d-flex flex-grow-1" role="search" action="{% url 'dashboard:device_search' %}" method="get" style="max-width:420px">
+          <input class="form-control form-control-sm" type="search" name="q"
+                 list="nav-device-options" autocomplete="off"
+                 placeholder="🔍 Device MAC / IP / hostname → 360"
+                 value="{{ request.GET.q }}">
+          <button class="btn btn-sm btn-outline-secondary ms-1" type="submit">Search</button>
+        </form>
+        <datalist id="nav-device-options">
+          {% for o in nav_device_options %}<option value="{{ o }}">{% endfor %}
+        </datalist>
+      </header>
+
+      <div class="content">
+        {% block content %}{% endblock %}
+      </div>
+
+      <footer class="text-center text-muted small py-4">
+        Cisco ISE + FMC integration. ISE/FMC configuration via REST APIs; FMC
+        events via eStreamer (eNcore) ingestion.
+      </footer>
     </div>
-    {% endif %}
-  </nav>
-
-  <div class="container-fluid py-4">
-    {% block content %}{% endblock %}
   </div>
-
-  <footer class="text-center text-muted small py-4">
-    Cisco ISE + FMC integration. ISE/FMC configuration via REST APIs; FMC events
-    via eStreamer (eNcore) ingestion.
-  </footer>
+  {% endwith %}
 
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
   <script src="https://cdn.datatables.net/1.13.8/js/jquery.dataTables.min.js"></script>
   <script src="https://cdn.datatables.net/1.13.8/js/dataTables.bootstrap5.min.js"></script>
+  <script>
+    (function(){
+      var layout = document.getElementById('layout');
+      var toggle = document.getElementById('sbToggle');
+      var isMobile = function(){ return window.matchMedia('(max-width: 768px)').matches; };
+      // restore persisted collapsed state (desktop only)
+      try { if(localStorage.getItem('sbCollapsed')==='1') layout.classList.add('collapsed'); } catch(e){}
+      toggle.addEventListener('click', function(){
+        if(isMobile()){ layout.classList.toggle('mobile-open'); return; }
+        layout.classList.toggle('collapsed');
+        try { localStorage.setItem('sbCollapsed', layout.classList.contains('collapsed')?'1':'0'); } catch(e){}
+      });
+    })();
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>
