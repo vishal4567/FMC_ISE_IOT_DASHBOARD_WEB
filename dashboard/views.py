@@ -342,6 +342,11 @@ _EVENT_SEARCH_TEXT = ["device_mac", "device_type", "event_type", "severity",
                       "hostname", "application", "site", "action",
                       "rule_matched", "firewall"]
 _EVENT_SEARCH_IP = ["device_ip", "source_ip", "dest_ip"]
+# curated, readable column set for the events table (the full row has ~35 fields,
+# which also makes DataTables' per-column server-side params overflow the URL).
+_EVENT_DISPLAY_COLS = ["timestamp", "severity", "event_type", "device_mac",
+                       "device_ip", "device_type", "site", "source_ip",
+                       "dest_ip", "application", "action", "threat_name"]
 
 
 def dataset_data(request, key):
@@ -409,14 +414,11 @@ def _dataset_page(request, key):
         filtered = qs.count() if search else total
         page = [event_store._to_dict(e)
                 for e in qs.order_by("-ts")[start:start + length]]
-        columns = _infer_cols(page)
-        if not columns:
-            # empty page (e.g. searched past the end) - derive stable columns
-            one = _events_qs(request).order_by("-ts").first()
-            columns = _infer_cols([event_store._to_dict(one)]) if one else []
+        # curated columns (stable, readable, and keeps the DataTables server-side
+        # query small). Rows keep all keys; DataTables only uses these.
         return JsonResponse({"draw": draw, "recordsTotal": total,
                              "recordsFiltered": filtered, "data": page,
-                             "columns": columns})
+                             "columns": _EVENT_DISPLAY_COLS})
 
     # ---- other datasets: page a materialized list ----
     live = _live_filtered(key, request)

@@ -5,11 +5,21 @@
 <style>
   /* SOC palette — theme-aware via Bootstrap tokens + a security accent set */
   .soc { --acc-cyan:#22d3ee; --acc-red:#ef4444; --acc-amber:#f59e0b;
-         --acc-green:#10b981; --acc-violet:#8b5cf6; }
+         --acc-green:#10b981; --acc-violet:#8b5cf6;
+         /* elevated card surface + page - light defaults */
+         --soc-surface:#ffffff; --soc-line:var(--bs-border-color);
+         --soc-shadow:0 1px 3px rgba(16,24,40,.08); }
+  /* dark: page is deep slate, cards a step LIGHTER so they lift off it */
+  :root[data-bs-theme="dark"] .soc {
+    --soc-surface:#212b38; --soc-line:#33404f; --soc-shadow:none; }
+  /* make the SOC page itself a touch darker than the cards in dark mode */
+  :root[data-bs-theme="dark"] .soc-page { background:#151b24; }
+  .soc-page { margin:-20px; padding:20px; min-height:calc(100vh - 52px); }
   .soc h6.sec { font-size:.7rem; letter-spacing:.09em; text-transform:uppercase;
     color:var(--bs-secondary-color); font-weight:700; }
-  .kpi { border:1px solid var(--bs-border-color); border-radius:12px;
-    background:var(--bs-body-bg); padding:14px 16px; height:100%;
+  .kpi { border:1px solid var(--soc-line); border-radius:12px;
+    background:var(--soc-surface); box-shadow:var(--soc-shadow);
+    padding:14px 16px; height:100%;
     position:relative; overflow:hidden; text-decoration:none; display:block;
     transition:border-color .15s, transform .05s; }
   .kpi:hover { border-color:var(--acc-cyan); transform:translateY(-1px); }
@@ -24,8 +34,9 @@
   .kpi.green .bar{background:var(--acc-green)} .kpi.green .val{color:var(--acc-green)}
   .kpi.cyan .bar{background:var(--acc-cyan)} .kpi.cyan .val{color:var(--acc-cyan)}
   .kpi.violet .bar{background:var(--acc-violet)}
-  .panel { border:1px solid var(--bs-border-color); border-radius:12px;
-    background:var(--bs-body-bg); padding:16px; height:100%; }
+  .panel { border:1px solid var(--soc-line); border-radius:12px;
+    background:var(--soc-surface); box-shadow:var(--soc-shadow);
+    padding:16px; height:100%; }
   .soc table { font-variant-numeric:tabular-nums; }
   .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
 </style>

@@ -84,7 +84,15 @@
               // merge the dashboard filters into DataTables' params
               new URLSearchParams(FILTERS).forEach((v, k) => { d[k] = v; });
             },
-            dataSrc: "data"
+            dataSrc: "data",
+            error: function (xhr) {
+              var msg = "";
+              try { msg = (JSON.parse(xhr.responseText) || {}).error || ""; }
+              catch (e) { msg = (xhr.responseText || "").replace(/<[^>]*>/g, " ").trim().slice(0, 400); }
+              $("#status").removeClass("d-none alert-secondary").addClass("alert-danger")
+                .html("<strong>Data load failed (HTTP " + xhr.status + ")</strong><br>" + esc(msg || "no response body"));
+              $("#table-wrap").addClass("d-none");
+            }
           },
           columns: cols.map(c => ({ data: c, title: c, defaultContent: "",
             render: function (v) { return esc(v); } })),
