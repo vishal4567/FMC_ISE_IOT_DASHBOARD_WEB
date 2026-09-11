@@ -51,12 +51,12 @@ _REFERENCE_TTL = 60 * 60 * 30                 # 30h - survives a missed daily ru
 # --------------------------------------------------------------------------- #
 # Daily reference data
 # --------------------------------------------------------------------------- #
-@shared_task(name="dashboard.tasks.refresh_ise_reference")
 def _logger(log):
     """Return a callable progress logger (no-op when called from Celery)."""
     return log if callable(log) else (lambda *a, **k: None)
 
 
+@shared_task(name="dashboard.tasks.refresh_ise_reference")
 def refresh_ise_reference(log=None) -> dict:
     """Resolve IoT profile ids + rebuild the NAD->Location map, cached for the
     hourly sync. Runs daily (reference data changes rarely). Pass log=print (or a
