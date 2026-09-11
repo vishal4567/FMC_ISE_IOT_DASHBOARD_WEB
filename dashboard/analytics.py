@@ -31,6 +31,14 @@ def _threat_q():
     return ~Q(event_type="Connection") & Q(severity__in=THREAT_SEVERITIES)
 
 
+def _risk_q():
+    """A device is 'at risk' only if it's an ISE-onboarded device (in_ise) with a
+    real threat - a device not in ISE is outside the compliance population, so it
+    must not inflate at-risk / reduce compliance."""
+    from django.db.models import Q
+    return _threat_q() & Q(in_ise=True)
+
+
 def _events():
     """All recent events as analytics-ready dicts (from the DB)."""
     return event_store.recent_events_as_dicts(days=EVENT_WINDOW_DAYS)
@@ -152,7 +160,7 @@ def devices_at_risk(hours=None, site=None, device_type=None):
 
     rows = (
         _base_qs(hours, site, device_type)
-        .filter(_threat_q())
+        .filter(_risk_q())
         .values("device_mac")
         .annotate(
             event_count=Count("id"),
@@ -247,7 +255,7 @@ def by_device_type(hours=None, site=None):
             .values("device_type")
             .annotate(
                 devices=Count("device_mac", distinct=True),
-                at_risk=Count("device_mac", distinct=True, filter=_threat_q()),
+                at_risk=Count("device_mac", distinct=True, filter=_risk_q()),
                 events=Count("id"),
                 threats=Count("id", filter=_threat_q()),
                 critical=Count("id", filter=Q(severity="Critical")
@@ -329,7 +337,7 @@ def compliance(hours=None, site=None, device_type=None):
     # not a Python set). quarantined = inventory count. To union without a big
     # set, subtract the overlap (quarantined MACs that ALSO have a threat) - the
     # quarantined list is small, so that IN-filtered count is cheap.
-    threat_qs = _base_qs(hours, site, device_type).filter(_threat_q())
+    threat_qs = _base_qs(hours, site, device_type).filter(_risk_q())
     at_risk = threat_qs.exclude(device_mac="").values("device_mac").distinct().count()
     quar_macs = list(inv.filter(authorization_profile__icontains="quarantine")
                      .values_list("mac", flat=True))
@@ -375,7 +383,7 @@ def summary(hours=None, site=None, device_type=None):
         total_events=Count("id"),
         threat_events=Count("id", filter=_threat_q()),
         blocked=Count("id", filter=Q(action__in=_BLOCK)),
-        devices_at_risk=Count("device_mac", distinct=True, filter=_threat_q()),
+        devices_at_risk=Count("device_mac", distinct=True, filter=_risk_q()),
         critical=Count("id", filter=Q(severity="Critical")
                        & ~Q(event_type="Connection")),
     )
