@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · IoT Security Dashboard</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    :root { color-scheme: light; }
+    body {
+      min-height: 100vh; margin: 0; display: flex; align-items: center;
+      justify-content: center;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: linear-gradient(135deg, #0f2027 0%, #203a43 50%, #2c5364 100%);
+      padding: 24px;
+    }
+    .login-card {
+      width: 100%; max-width: 400px; background: #fff; border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.35); overflow: hidden;
+    }
+    .login-head {
+      padding: 32px 32px 8px; text-align: center;
+    }
+    .login-logo {
+      width: 56px; height: 56px; border-radius: 14px; display: inline-flex;
+      align-items: center; justify-content: center; font-size: 28px;
+      background: linear-gradient(135deg, #2c5364, #0dcaf0); color: #fff;
+      margin-bottom: 14px;
+    }
+    .login-body { padding: 8px 32px 32px; }
+    .form-label { font-size: .8rem; font-weight: 600; color: #495057; }
+    .btn-signin {
+      background: linear-gradient(135deg, #203a43, #2c5364); border: none;
+    }
+    .btn-signin:hover { filter: brightness(1.1); }
+    .login-foot { text-align: center; font-size: .75rem; color: #adb5bd;
+      padding-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <div class="login-card">
+    <div class="login-head">
+      <div class="login-logo">🛡️</div>
+      <h5 class="mb-1 fw-bold">IoT Security Dashboard</h5>
+      <div class="text-muted small">FMC + ISE · sign in to continue</div>
+    </div>
+    <div class="login-body">
+      {% if form.errors %}
+        <div class="alert alert-danger py-2 small mb-3">
+          Invalid username or password. Please try again.
+        </div>
+      {% endif %}
+      {% if next and not form.errors %}
+        <div class="alert alert-secondary py-2 small mb-3">
+          Please sign in to continue.
+        </div>
+      {% endif %}
+      <form method="post" action="{% url 'dashboard:login' %}">
+        {% csrf_token %}
+        <input type="hidden" name="next" value="{{ next }}">
+        <div class="mb-3">
+          <label class="form-label" for="id_username">Username</label>
+          <input type="text" name="username" id="id_username" autofocus
+                 required class="form-control form-control-lg"
+                 autocomplete="username" placeholder="you@company">
+        </div>
+        <div class="mb-4">
+          <label class="form-label" for="id_password">Password</label>
+          <input type="password" name="password" id="id_password" required
+                 class="form-control form-control-lg"
+                 autocomplete="current-password" placeholder="••••••••">
+        </div>
+        <button type="submit" class="btn btn-signin btn-lg w-100 text-white fw-semibold">
+          Sign in
+        </button>
+      </form>
+    </div>
+    <div class="login-foot">Authorized users only · activity is logged</div>
+  </div>
+</body>
+</html>

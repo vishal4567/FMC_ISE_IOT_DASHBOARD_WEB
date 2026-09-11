@@ -21,8 +21,10 @@
       <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:mapping' %}">ISE ↔ FMC Mapping</a></li>
       <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:reports' %}">Reports</a></li>
       <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:readiness' %}">Policy Readiness</a></li>
+      {% if user.is_staff %}
       <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:config_sites' %}">⚙ Config</a></li>
       <li class="nav-item"><a class="nav-link" href="{% url 'dashboard:config_settings' %}">⚙ Settings</a></li>
+      {% endif %}
     </ul>
     <form class="d-flex" role="search" action="{% url 'dashboard:device_search' %}" method="get">
       <input class="form-control form-control-sm" type="search" name="q"
@@ -34,6 +36,17 @@
     <datalist id="nav-device-options">
       {% for o in nav_device_options %}<option value="{{ o }}">{% endfor %}
     </datalist>
+    {% if user.is_authenticated %}
+    <div class="d-flex align-items-center ms-3 text-light">
+      <span class="small me-2">👤 {{ user.username }}
+        <span class="badge {% if user.is_staff %}bg-info text-dark{% else %}bg-secondary{% endif %} ms-1">{% if user.is_staff %}admin{% else %}viewer{% endif %}</span>
+      </span>
+      <form method="post" action="{% url 'dashboard:logout' %}" class="m-0">
+        {% csrf_token %}
+        <button class="btn btn-sm btn-outline-light" type="submit">Logout</button>
+      </form>
+    </div>
+    {% endif %}
   </nav>
 
   <div class="container-fluid py-4">

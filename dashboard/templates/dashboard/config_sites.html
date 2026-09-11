@@ -28,6 +28,7 @@
 
 <!-- Add a new code -->
 <form method="post" class="card shadow-sm mb-3"><div class="card-body py-2 d-flex flex-wrap align-items-end gap-2">
+  {% csrf_token %}
   <input type="hidden" name="action" value="add">
   <div>
     <label class="form-label small mb-0 text-muted">Hostname code</label>
@@ -44,9 +45,9 @@
 
 <!-- Per-row forms declared OUTSIDE the table; inputs/buttons below bind via form="" -->
 {% for r in rows %}
-  <form id="edit-{{ r.id }}"   method="post"><input type="hidden" name="action" value="edit"><input type="hidden" name="id" value="{{ r.id }}"></form>
-  <form id="toggle-{{ r.id }}" method="post"><input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="{{ r.id }}"></form>
-  <form id="delete-{{ r.id }}" method="post" onsubmit="return confirm('Delete mapping {{ r.code }} → {{ r.site }}?');"><input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ r.id }}"></form>
+  <form id="edit-{{ r.id }}"   method="post">{% csrf_token %}<input type="hidden" name="action" value="edit"><input type="hidden" name="id" value="{{ r.id }}"></form>
+  <form id="toggle-{{ r.id }}" method="post">{% csrf_token %}<input type="hidden" name="action" value="toggle"><input type="hidden" name="id" value="{{ r.id }}"></form>
+  <form id="delete-{{ r.id }}" method="post" onsubmit="return confirm('Delete mapping {{ r.code }} → {{ r.site }}?');">{% csrf_token %}<input type="hidden" name="action" value="delete"><input type="hidden" name="id" value="{{ r.id }}"></form>
 {% endfor %}
 
 <!-- Existing mappings -->
