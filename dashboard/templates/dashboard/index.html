@@ -131,13 +131,13 @@
         {% for t in leaderboard %}
         <tr class="{% if selected_type == t.device_type %}table-primary{% endif %}">
           <td class="fw-semibold">{{ t.device_type }}</td>
-          <td class="text-end">{{ t.devices }}</td>
-          <td class="text-end">{{ t.events }}</td>
-          <td class="text-end fw-bold text-danger">{{ t.threats }}</td>
-          <td class="text-end">{{ t.critical }}</td>
+          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ t.q }}" title="View devices">{{ t.devices }}</a></td>
+          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}" title="View events">{{ t.events }}</a></td>
+          <td class="text-end fw-bold text-danger"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;threats=1" title="View threat events">{{ t.threats }}</a></td>
+          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;severity=Critical" title="View critical events">{{ t.critical }}</a></td>
           <td class="text-end">{{ t.traffic_mb }}</td>
           <td class="text-end">{{ t.pct_blocked }}%</td>
-          <td class="text-end fw-semibold {% if t.compliance >= 90 %}text-success{% elif t.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ t.compliance }}%</td>
+          <td class="text-end fw-semibold {% if t.compliance >= 90 %}text-success{% elif t.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ t.q }}" title="View at-risk devices">{{ t.compliance }}%</a></td>
         </tr>
         {% endfor %}
       </tbody>

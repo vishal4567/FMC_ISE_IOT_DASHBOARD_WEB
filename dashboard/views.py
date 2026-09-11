@@ -69,6 +69,9 @@ def index(request):
             _nc = min(r["devices"], r.get("at_risk", 0) + r["quarantined"])
             r["compliance"] = round(100 * (r["devices"] - _nc) / r["devices"]) \
                 if r["devices"] else 100
+            # per-row click-through scope (site + range + this device type)
+            r["q"] = urlencode({"site": site, "range": rng,
+                                "type": r["device_type"]})
 
         types = [r["device_type"] for r in leaderboard]  # ordered by threats desc
         selected = type_param if type_param in types else (types[0] if types else None)
@@ -308,6 +311,12 @@ def _filter_rows(rows, request):
 
     if sev and "severity" in sample:
         rows = [r for r in rows if (r.get("severity") or "") == sev]
+
+    if request.GET.get("threats") == "1" and "event_type" in sample:
+        from dashboard.analytics import THREAT_SEVERITIES
+        rows = [r for r in rows
+                if (r.get("event_type") or "") != "Connection"
+                and (r.get("severity") or "") in THREAT_SEVERITIES]
 
     if site and site != "All" and "site" in sample:
         if site == SITE_UNASSIGNED:
