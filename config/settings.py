@@ -147,6 +147,10 @@ else:
         }
     }
 
+# Short TTL (seconds) for the cached dashboard analytics bundle. Repeated loads
+# of the same (site, range, type) reuse it; ?refresh=1 bypasses + refreshes.
+DASHBOARD_CACHE_TTL = _env_int("DASHBOARD_CACHE_TTL", 45)
+
 # ---------------------------------------------------------------------------
 # Event pipeline (ingest -> store -> query). Events come only from the DB,
 # written by the eStreamer ingester. Retention enforced by the purge task.

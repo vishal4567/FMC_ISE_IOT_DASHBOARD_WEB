@@ -38,87 +38,98 @@ def index(request):
     from urllib.parse import urlencode
     overall_q = urlencode({"site": site, "range": rng})
 
-    # ===== Dashboard 1 - ALL devices — NUMBERS ONLY =====
-    # The at-risk *device rows* are NOT computed here; they stream in via
-    # atrisk_partial (api/atrisk/) only when the user opens the table. The page
-    # itself carries counts/charts (all cheap DB aggregations), no row lists.
-    total_devices = analytics.ise_device_count(site=site)  # ISE inventory, site-aware
-    quarantined = analytics.quarantined_count(site=site)   # authz rule ~ Quarantine
-    trend_all = analytics.trend(hours, site=site)
-    severity_all = analytics.attack_severity(hours=hours, site=site)
-    leaderboard = analytics.by_device_type(hours=hours, site=site)
-    corr = analytics.correlation_summary()
-    sum_all = analytics.summary(hours=hours, site=site)  # counts in one query
-    compliance = analytics.compliance(hours=hours, site=site)
+    # ===== Heavy analytics, cached in Redis (short TTL) per filter combo =====
+    # All the event aggregations below are the expensive part; the same (site,
+    # range, type) combo is requested repeatedly (auto-refresh, multiple users),
+    # so we compute once and cache the bundle. ?refresh=1 bypasses + refreshes.
+    from django.conf import settings
+    from django.core.cache import cache
 
-    # "Devices" = ISE onboarded inventory for the type (not FMC-seen MACs). Keep
-    # the FMC-active count too, for context.
-    ise_counts = analytics.ise_type_counts(site=site)
-    quar_counts = analytics.quarantined_type_counts(site=site)
-    for r in leaderboard:
-        r["active_devices"] = r["devices"]
-        r["devices"] = ise_counts.get(r["device_type"], r["devices"])
-        r["quarantined"] = quar_counts.get(r["device_type"], 0)
-        # non-compliant = at-risk OR quarantined (approx union, capped)
-        _nc = min(r["devices"], r.get("at_risk", 0) + r["quarantined"])
-        r["compliance"] = round(100 * (r["devices"] - _nc) / r["devices"]) \
-            if r["devices"] else 100
+    type_param = request.GET.get("type") or ""
+    ttl = getattr(settings, "DASHBOARD_CACHE_TTL", 45)
+    cache_key = f"dash:v1:{site}|{rng}|{type_param}"
 
-    # ===== Dashboard 2 - one DEVICE TYPE (default = most threats) =====
-    types = [r["device_type"] for r in leaderboard]  # ordered by threats desc
-    selected = request.GET.get("type")
-    if selected not in types:
-        selected = types[0] if types else None
+    def _compute():
+        total_devices = analytics.ise_device_count(site=site)
+        quarantined = analytics.quarantined_count(site=site)
+        trend_all = analytics.trend(hours, site=site)
+        severity_all = analytics.attack_severity(hours=hours, site=site)
+        leaderboard = analytics.by_device_type(hours=hours, site=site)
+        corr = analytics.correlation_summary()
+        sum_all = analytics.summary(hours=hours, site=site)
+        comp = analytics.compliance(hours=hours, site=site)
 
-    t_row = next((r for r in leaderboard if r["device_type"] == selected), None)
-    t_trend = analytics.trend(hours, site=site, device_type=selected)
-    t_severity = analytics.attack_severity(hours=hours, site=site, device_type=selected)
-    sum_type = (analytics.summary(hours=hours, site=site, device_type=selected)
-                if selected else {})
+        # "Devices" = ISE onboarded inventory for the type (not FMC-seen MACs).
+        ise_counts = analytics.ise_type_counts(site=site)
+        quar_counts = analytics.quarantined_type_counts(site=site)
+        for r in leaderboard:
+            r["active_devices"] = r["devices"]
+            r["devices"] = ise_counts.get(r["device_type"], r["devices"])
+            r["quarantined"] = quar_counts.get(r["device_type"], 0)
+            _nc = min(r["devices"], r.get("at_risk", 0) + r["quarantined"])
+            r["compliance"] = round(100 * (r["devices"] - _nc) / r["devices"]) \
+                if r["devices"] else 100
 
-    type_comp = (analytics.compliance(hours=hours, site=site, device_type=selected)
-                 if selected else {"total": 0, "at_risk": 0, "quarantined": 0,
-                                   "score": 100})
-    type_metrics = {
-        "devices": type_comp["total"],
-        "at_risk": type_comp["at_risk"],
-        "quarantined": type_comp["quarantined"],
-        "threats": t_row["threats"] if t_row else 0,
-        "critical": t_row["critical"] if t_row else 0,
-        "traffic_mb": t_row["traffic_mb"] if t_row else 0,
-        "pct_blocked": t_row["pct_blocked"] if t_row else 0,
-        "compliance": type_comp["score"],
-    }
+        types = [r["device_type"] for r in leaderboard]  # ordered by threats desc
+        selected = type_param if type_param in types else (types[0] if types else None)
+        t_row = next((r for r in leaderboard if r["device_type"] == selected), None)
+        t_trend = analytics.trend(hours, site=site, device_type=selected)
+        t_severity = analytics.attack_severity(hours=hours, site=site, device_type=selected)
+        type_comp = (analytics.compliance(hours=hours, site=site, device_type=selected)
+                     if selected else {"total": 0, "at_risk": 0, "quarantined": 0,
+                                       "score": 100})
+        type_metrics = {
+            "devices": type_comp["total"],
+            "at_risk": type_comp["at_risk"],
+            "quarantined": type_comp["quarantined"],
+            "threats": t_row["threats"] if t_row else 0,
+            "critical": t_row["critical"] if t_row else 0,
+            "traffic_mb": t_row["traffic_mb"] if t_row else 0,
+            "pct_blocked": t_row["pct_blocked"] if t_row else 0,
+            "compliance": type_comp["score"],
+        }
+        return {
+            "total_devices": total_devices, "quarantined": quarantined,
+            "trend_all": trend_all, "severity_all": severity_all,
+            "leaderboard": leaderboard, "corr": corr, "sum_all": sum_all,
+            "compliance": comp, "types": types, "selected": selected,
+            "t_trend": t_trend, "t_severity": t_severity,
+            "type_metrics": type_metrics, "sites": analytics.sites(),
+        }
+
+    if refresh:
+        b = _compute()
+        cache.set(cache_key, b, ttl)
+    else:
+        b = cache.get_or_set(cache_key, _compute, ttl)
 
     context = {
         "status": services.connection_status(use_cache=not refresh),
         "filters": {
             "site": site,
             "range": rng,
-            "sites": analytics.sites(),
-            "granularity": trend_all["granularity"],
+            "sites": b["sites"],
+            "granularity": b["trend_all"]["granularity"],
         },
-        # Dashboard 1
         "widgets": {
-            "total_devices": total_devices,
-            "at_risk": sum_all["devices_at_risk"],
-            "quarantined": quarantined,
-            "threats_window": sum_all["threat_events"],
-            "critical": sum_all["critical"],
+            "total_devices": b["total_devices"],
+            "at_risk": b["sum_all"]["devices_at_risk"],
+            "quarantined": b["quarantined"],
+            "threats_window": b["sum_all"]["threat_events"],
+            "critical": b["sum_all"]["critical"],
         },
-        "correlation": corr,
-        "compliance": compliance,
+        "correlation": b["corr"],
+        "compliance": b["compliance"],
         "overall_q": overall_q,
-        "type_q": urlencode({"site": site, "range": rng, "type": selected or ""}),
-        "leaderboard": leaderboard,
-        "severity_json": json.dumps(severity_all),
-        "trend_json": json.dumps(trend_all["points"]),
-        # Dashboard 2 (device type)
-        "types": types,
-        "selected_type": selected,
-        "type_metrics": type_metrics,
-        "type_severity_json": json.dumps(t_severity),
-        "type_trend_json": json.dumps(t_trend["points"]),
+        "type_q": urlencode({"site": site, "range": rng, "type": b["selected"] or ""}),
+        "leaderboard": b["leaderboard"],
+        "severity_json": json.dumps(b["severity_all"]),
+        "trend_json": json.dumps(b["trend_all"]["points"]),
+        "types": b["types"],
+        "selected_type": b["selected"],
+        "type_metrics": b["type_metrics"],
+        "type_severity_json": json.dumps(b["t_severity"]),
+        "type_trend_json": json.dumps(b["t_trend"]["points"]),
     }
     return render(request, "dashboard/index.html", context)
 
