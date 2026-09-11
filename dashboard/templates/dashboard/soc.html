@@ -105,6 +105,71 @@
     </div>
   </div>
 
+  <!-- ===== Device-type focus (Dashboard 2) ===== -->
+  {% if selected_type %}
+  <div class="panel mb-3">
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+      <h6 class="sec mb-0">Device-type focus</h6>
+      <form method="get" class="d-flex align-items-center gap-2 ms-auto">
+        <input type="hidden" name="site" value="{{ filters.site }}">
+        <input type="hidden" name="range" value="{{ filters.range }}">
+        <label class="small text-secondary mb-0">Type</label>
+        <select name="type" class="form-select form-select-sm w-auto" onchange="this.form.submit()">
+          {% for ty in types %}<option value="{{ ty }}" {% if ty == selected_type %}selected{% endif %}>{{ ty }}</option>{% endfor %}
+        </select>
+      </form>
+    </div>
+
+    <div class="row g-2 mb-3">
+      <div class="col-6 col-md-3 col-xl">
+        <a class="kpi cyan" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ type_q }}">
+          <span class="bar"></span><div class="lab">Devices</div>
+          <div class="val">{{ type_metrics.devices }}</div></a></div>
+      <div class="col-6 col-md-3 col-xl">
+        <a class="kpi red" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ type_q }}">
+          <span class="bar"></span><div class="lab">At risk</div>
+          <div class="val">{{ type_metrics.at_risk }}</div></a></div>
+      <div class="col-6 col-md-3 col-xl">
+        <a class="kpi amber" href="{% url 'dashboard:dataset' 'ise-quarantined' %}?{{ type_q }}">
+          <span class="bar"></span><div class="lab">Quarantined</div>
+          <div class="val">{{ type_metrics.quarantined }}</div></a></div>
+      <div class="col-6 col-md-3 col-xl">
+        <a class="kpi" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}&amp;threats=1">
+          <span class="bar"></span><div class="lab">Threats</div>
+          <div class="val">{{ type_metrics.threats }}</div></a></div>
+      <div class="col-6 col-md-3 col-xl">
+        <a class="kpi red" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}&amp;severity=Critical&amp;threats=1">
+          <span class="bar"></span><div class="lab">Critical</div>
+          <div class="val">{{ type_metrics.critical }}</div></a></div>
+      <div class="col-6 col-md-3 col-xl">
+        <div class="kpi violet"><span class="bar"></span><div class="lab">Traffic (MB)</div>
+          <div class="val">{{ type_metrics.traffic_mb }}</div></div></div>
+      <div class="col-6 col-md-3 col-xl">
+        <div class="kpi"><span class="bar"></span><div class="lab">% Blocked</div>
+          <div class="val">{{ type_metrics.pct_blocked }}%</div></div></div>
+      <div class="col-6 col-md-3 col-xl">
+        <div class="kpi {% if type_metrics.compliance >= 90 %}green{% elif type_metrics.compliance >= 70 %}amber{% else %}red{% endif %}">
+          <span class="bar"></span><div class="lab">Compliance</div>
+          <div class="val">{{ type_metrics.compliance }}%</div></div></div>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-lg-4">
+        <h6 class="sec d-flex justify-content-between">Severity — {{ selected_type }}
+          <span class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-outline-secondary active" onclick="sevToggle('sevSocType','doughnut',this)">Pie</button>
+            <button type="button" class="btn btn-outline-secondary" onclick="sevToggle('sevSocType','bar',this)">Bar</button>
+          </span></h6>
+        <canvas id="sevSocType" height="200"></canvas>
+      </div>
+      <div class="col-lg-8">
+        <h6 class="sec">Trend — {{ selected_type }}</h6>
+        <canvas id="trendSocType" height="110"></canvas>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   <!-- device-type table -->
   <div class="panel">
     <h6 class="sec mb-2">Device types — ranked by threats</h6>
@@ -167,5 +232,10 @@
   sevStore['sevSoc'] = {{ severity_json|safe }};
   renderSev('sevSoc','doughnut');
   soctrend('trendSoc', {{ trend_json|safe }});
+  {% if selected_type %}
+  sevStore['sevSocType'] = {{ type_severity_json|safe }};
+  renderSev('sevSocType','doughnut');
+  soctrend('trendSocType', {{ type_trend_json|safe }});
+  {% endif %}
 </script>
 {% endblock %}
