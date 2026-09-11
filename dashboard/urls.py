@@ -24,5 +24,6 @@ urlpatterns = [
     path("config/activity/", views.config_activity, name="config_activity"),
     path("dataset/<slug:key>/", views.dataset_table, name="dataset"),
     path("dataset/<slug:key>.json", views.dataset_json, name="dataset_json"),
+    path("dataset/<slug:key>/data", views.dataset_data, name="dataset_data"),
     path("dataset/<slug:key>/export.csv", views.dataset_csv, name="dataset_csv"),
 ]

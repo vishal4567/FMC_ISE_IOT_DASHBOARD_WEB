@@ -44,9 +44,11 @@
 
 {% block scripts %}
 <script>
-  // Forward the current Site / Time / device-type filters (query string) so the
-  // table shows the SAME scope as the dashboard the user clicked from.
-  const DATA_URL = "{% url 'dashboard:dataset_json' dataset.key %}" + window.location.search;
+  // Server-side paginated. The dashboard filters (Site / Time / type / severity /
+  // threats) ride in window.location.search; DataTables adds draw/start/length/
+  // search on top, and the server returns just the requested page + counts.
+  const BASE = "{% url 'dashboard:dataset_data' dataset.key %}";
+  const FILTERS = window.location.search;   // e.g. ?site=..&range=..&type=..
   let dt = null;
 
   function esc(v) {
@@ -56,38 +58,35 @@
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   }
 
-  function load() {
+  function initTable() {
     const $status = $("#status"), $wrap = $("#table-wrap");
-    $wrap.addClass("d-none");
-    $status.removeClass("d-none alert-danger alert-secondary")
-           .addClass("alert-secondary")
-           .html('<span class="spinner-border spinner-border-sm me-2"></span>Loading data…');
-
-    $.getJSON(DATA_URL)
-      .done(function (d) {
-        if (d.error) {
+    // preflight: discover columns (1 row) before initialising DataTables
+    $.getJSON(BASE + FILTERS + (FILTERS ? "&" : "?") + "draw=0&start=0&length=1")
+      .done(function (meta) {
+        if (meta.error) {
           $status.removeClass("alert-secondary").addClass("alert-danger")
-                 .text("Could not load: " + d.error);
+                 .text("Could not load: " + meta.error);
           return;
         }
-        if (!d.rows.length) {
-          $status.text("No records.");
-          return;
-        }
-        // Header
-        $("#thead-row").html(d.columns.map(c => `<th>${esc(c)}</th>`).join(""));
-        // Body
-        $("#tbody").html(d.rows.map(r =>
-          "<tr>" + d.columns.map(c => `<td>${esc(r[c])}</td>`).join("") + "</tr>"
-        ).join(""));
-        $("#rowcount").text(d.count);
-        $("#meta").text(d.fetched_at ? ("as of " + new Date(d.fetched_at).toLocaleString()) : "");
+        const cols = (meta.columns || []);
+        if (!cols.length && !meta.recordsTotal) { $status.text("No records."); return; }
+        $("#thead-row").html(cols.map(c => `<th>${esc(c)}</th>`).join(""));
         $status.addClass("d-none");
         $wrap.removeClass("d-none");
-        if (dt) { dt.destroy(); }
         dt = $("#data-table").DataTable({
-          pageLength: 25, lengthMenu: [10, 25, 50, 100], order: [],
-          language: { search: "Search (MAC / IP / hostname / type):" }
+          serverSide: true, processing: true, order: [], searchDelay: 400,
+          pageLength: 25, lengthMenu: [10, 25, 50, 100, ["10","25","50","100"]],
+          ajax: {
+            url: BASE,
+            data: function (d) {
+              // merge the dashboard filters into DataTables' params
+              new URLSearchParams(FILTERS).forEach((v, k) => { d[k] = v; });
+            },
+            dataSrc: "data"
+          },
+          columns: cols.map(c => ({ data: c, title: c,
+            render: function (v) { return esc(v); } })),
+          language: { search: "Search:", processing: "Loading…" }
         });
       })
       .fail(function (x) {
@@ -98,9 +97,9 @@
 
   $(function () {
     // carry the filters onto the CSV export too
-    var q = window.location.search;
-    if (q) { var c = document.getElementById("csv-link"); c.href = c.href + q; }
-    load(); $("#reload").on("click", load);
+    if (FILTERS) { var c = document.getElementById("csv-link"); c.href = c.href + FILTERS; }
+    initTable();
+    $("#reload").on("click", function () { if (dt) dt.ajax.reload(); });
   });
 </script>
 {% endblock %}

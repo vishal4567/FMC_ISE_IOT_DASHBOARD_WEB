@@ -277,11 +277,8 @@ def dataset_json(request, key):
     })
 
 
-def _live_filtered(key, request):
-    """For datasets that natively support (hours, site, device_type), compute
-    live with the active filters - so a click-through table honours the Time
-    (and Site/Type) filter even though its rows are aggregated (no per-row
-    timestamp for _filter_rows to use). Returns rows, or None to fall back."""
+def _scope_params(request):
+    """(hours, site, device_type) from the dashboard filter query params."""
     hours = {"1h": 1, "24h": 24, "7d": 168}.get(request.GET.get("range") or "")
     site = (request.GET.get("site") or "").strip() or None
     if site == "All":
@@ -289,6 +286,29 @@ def _live_filtered(key, request):
     dtype = (request.GET.get("type") or "").strip() or None
     if dtype == "All":
         dtype = None
+    return hours, site, dtype
+
+
+def _events_qs(request):
+    """SecurityEvent queryset with the active dashboard filters (site/type/time/
+    severity/threats) applied - the source for the sim-events table."""
+    from dashboard import analytics
+    hours, site, dtype = _scope_params(request)
+    qs = analytics._base_qs(hours=hours, site=site, device_type=dtype)
+    sev = (request.GET.get("severity") or "").strip()
+    if sev:
+        qs = qs.filter(severity=sev)
+    if request.GET.get("threats") == "1":
+        qs = qs.filter(analytics._threat_q())
+    return qs
+
+
+def _live_filtered(key, request):
+    """For datasets that natively support (hours, site, device_type), compute
+    live with the active filters - so a click-through table honours the Time
+    (and Site/Type) filter even though its rows are aggregated (no per-row
+    timestamp for _filter_rows to use). Returns rows, or None to fall back."""
+    hours, site, dtype = _scope_params(request)
     if key == "sim-devices-at-risk":
         from dashboard import analytics
         return analytics.devices_at_risk(hours=hours, site=site, device_type=dtype)
@@ -297,15 +317,92 @@ def _live_filtered(key, request):
         # Query SecurityEvent live with the SAME filters as the dashboard (site /
         # type / time / severity / threats), so a click-through table shows the
         # ACTUAL matching events - not a filtered slice of a capped snapshot.
-        from dashboard import analytics, event_store
-        qs = analytics._base_qs(hours=hours, site=site, device_type=dtype)
-        sev = (request.GET.get("severity") or "").strip()
-        if sev:
-            qs = qs.filter(severity=sev)
-        if request.GET.get("threats") == "1":
-            qs = qs.filter(analytics._threat_q())
-        return [event_store._to_dict(e) for e in qs.order_by("-ts")[:2000]]
+        from dashboard import event_store
+        return [event_store._to_dict(e)
+                for e in _events_qs(request).order_by("-ts")[:2000]]
     return None
+
+
+# --------------------------------------------------------------------------- #
+# Server-side pagination (DataTables protocol). sim-events pages at the DB
+# level (real counts, DB search); other datasets page a materialized list.
+# --------------------------------------------------------------------------- #
+_EVENT_SEARCH_TEXT = ["device_mac", "device_type", "event_type", "severity",
+                      "hostname", "application", "site", "action",
+                      "rule_matched", "firewall"]
+_EVENT_SEARCH_IP = ["device_ip", "source_ip", "dest_ip"]
+
+
+def dataset_data(request, key):
+    """DataTables server-side endpoint: returns one page + total/filtered counts.
+    Params: draw, start, length, search[value]. Response: {draw, recordsTotal,
+    recordsFiltered, data, columns}."""
+    ds = services.DATASETS.get(key)
+    if ds is None:
+        raise Http404("Unknown dataset")
+
+    def _int(name, default):
+        try:
+            return int(request.GET.get(name, default))
+        except (TypeError, ValueError):
+            return default
+
+    draw = _int("draw", 1)
+    start = max(0, _int("start", 0))
+    length = _int("length", 25)
+    if length < 0:
+        length = 100000  # DataTables "All"
+    search = (request.GET.get("search[value]") or "").strip()
+
+    # ---- sim-events: page at the DB level ----
+    if key == "sim-events":
+        from django.db.models import Q, TextField
+        from django.db.models.functions import Cast
+        from dashboard import event_store
+
+        qs = _events_qs(request)
+        total = qs.count()
+        if search:
+            qs = qs.annotate(
+                _dip=Cast("device_ip", TextField()),
+                _sip=Cast("source_ip", TextField()),
+                _pip=Cast("dest_ip", TextField()))
+            cond = Q()
+            for f in _EVENT_SEARCH_TEXT:
+                cond |= Q(**{f"{f}__icontains": search})
+            for f in ("_dip", "_sip", "_pip"):
+                cond |= Q(**{f"{f}__icontains": search})
+            qs = qs.filter(cond)
+        filtered = qs.count() if search else total
+        page = [event_store._to_dict(e)
+                for e in qs.order_by("-ts")[start:start + length]]
+        columns = _infer_cols(page)
+        if not columns:
+            # empty page (e.g. searched past the end) - derive stable columns
+            one = _events_qs(request).order_by("-ts").first()
+            columns = _infer_cols([event_store._to_dict(one)]) if one else []
+        return JsonResponse({"draw": draw, "recordsTotal": total,
+                             "recordsFiltered": filtered, "data": page,
+                             "columns": columns})
+
+    # ---- other datasets: page a materialized list ----
+    live = _live_filtered(key, request)
+    if live is not None:
+        rows, columns = live, _infer_cols(live)
+    else:
+        payload = services.fetch_dataset(key)
+        rows = _filter_rows(payload["rows"], request)
+        columns = payload["columns"] or _infer_cols(rows)
+    total = len(rows)
+    if search:
+        s = search.lower()
+        rows = [r for r in rows if isinstance(r, dict)
+                and any(s in str(r.get(c, "")).lower() for c in columns)]
+    filtered = len(rows)
+    page = rows[start:start + length]
+    return JsonResponse({"draw": draw, "recordsTotal": total,
+                         "recordsFiltered": filtered, "data": page,
+                         "columns": columns})
 
 
 def _filter_rows(rows, request):
