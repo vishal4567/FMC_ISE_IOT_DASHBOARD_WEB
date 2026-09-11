@@ -50,6 +50,8 @@
   const BASE = "{% url 'dashboard:dataset_data' dataset.key %}";
   const FILTERS = window.location.search;   // e.g. ?site=..&range=..&type=..
   let dt = null;
+  // don't pop up an alert on ajax/error; show it inline instead
+  $.fn.dataTable.ext.errMode = 'none';
 
   function esc(v) {
     if (v === null || v === undefined) return "";
@@ -84,9 +86,13 @@
             },
             dataSrc: "data"
           },
-          columns: cols.map(c => ({ data: c, title: c,
+          columns: cols.map(c => ({ data: c, title: c, defaultContent: "",
             render: function (v) { return esc(v); } })),
           language: { search: "Search:", processing: "Loading…" }
+        });
+        dt.on('error.dt', function (e, settings, techNote, message) {
+          $("#status").removeClass("d-none alert-secondary").addClass("alert-danger")
+                      .text("Table error: " + (message || techNote));
         });
       })
       .fail(function (x) {

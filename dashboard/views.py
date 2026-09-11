@@ -13,7 +13,18 @@ from .adminauth import admin_required
 
 
 def index(request):
-    """Main dashboard - the five requirement widgets.
+    """Classic dashboard (unchanged)."""
+    return render(request, "dashboard/index.html", _dashboard_context(request))
+
+
+def soc_dashboard(request):
+    """Alternate SOC-styled dashboard - same data, elegant dark-first layout."""
+    return render(request, "dashboard/soc.html", _dashboard_context(request))
+
+
+def _dashboard_context(request):
+    """Build the shared dashboard context (numbers + charts) used by both the
+    classic and the SOC views. Heavy analytics are cached per filter combo.
 
     W1 Total IoT Devices Onboarded (ISE)   W2 IoT Devices at Risk
     W3 Quarantined / Blocked (ISE)          W4 Hourly Traffic & Threat trend
@@ -134,7 +145,7 @@ def index(request):
         "type_severity_json": json.dumps(b["t_severity"]),
         "type_trend_json": json.dumps(b["t_trend"]["points"]),
     }
-    return render(request, "dashboard/index.html", context)
+    return context
 
 
 def atrisk_partial(request):
@@ -334,7 +345,29 @@ _EVENT_SEARCH_IP = ["device_ip", "source_ip", "dest_ip"]
 
 
 def dataset_data(request, key):
-    """DataTables server-side endpoint: returns one page + total/filtered counts.
+    """DataTables server-side endpoint (safe wrapper): never 500s the AJAX -
+    returns a JSON error payload DataTables can display inline instead."""
+    def _int(name, default):
+        try:
+            return int(request.GET.get(name, default))
+        except (TypeError, ValueError):
+            return default
+    try:
+        return _dataset_page(request, key)
+    except Http404:
+        raise
+    except Exception as exc:
+        import logging
+        import traceback
+        logging.getLogger("dashboard").error(
+            "dataset_data(%s) failed: %s\n%s", key, exc, traceback.format_exc())
+        return JsonResponse({"draw": _int("draw", 1), "recordsTotal": 0,
+                             "recordsFiltered": 0, "data": [],
+                             "error": f"{type(exc).__name__}: {exc}"})
+
+
+def _dataset_page(request, key):
+    """Returns one page + total/filtered counts.
     Params: draw, start, length, search[value]. Response: {draw, recordsTotal,
     recordsFiltered, data, columns}."""
     ds = services.DATASETS.get(key)

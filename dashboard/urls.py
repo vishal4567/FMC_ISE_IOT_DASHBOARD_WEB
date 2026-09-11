@@ -11,6 +11,7 @@ urlpatterns = [
         name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("", views.index, name="index"),
+    path("soc/", views.soc_dashboard, name="soc"),
     path("reports/", views.reports, name="reports"),
     path("mapping/", views.mapping, name="mapping"),
     path("api/atrisk/", views.atrisk_partial, name="atrisk_partial"),

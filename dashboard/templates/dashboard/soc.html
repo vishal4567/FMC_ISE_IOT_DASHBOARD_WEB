@@ -1,0 +1,171 @@
+{% extends "dashboard/base.html" %}
+{% block title %}SOC View{% endblock %}
+
+{% block content %}
+<style>
+  /* SOC palette — theme-aware via Bootstrap tokens + a security accent set */
+  .soc { --acc-cyan:#22d3ee; --acc-red:#ef4444; --acc-amber:#f59e0b;
+         --acc-green:#10b981; --acc-violet:#8b5cf6; }
+  .soc h6.sec { font-size:.7rem; letter-spacing:.09em; text-transform:uppercase;
+    color:var(--bs-secondary-color); font-weight:700; }
+  .kpi { border:1px solid var(--bs-border-color); border-radius:12px;
+    background:var(--bs-body-bg); padding:14px 16px; height:100%;
+    position:relative; overflow:hidden; text-decoration:none; display:block;
+    transition:border-color .15s, transform .05s; }
+  .kpi:hover { border-color:var(--acc-cyan); transform:translateY(-1px); }
+  .kpi .lab { font-size:.66rem; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--bs-secondary-color); font-weight:600; }
+  .kpi .val { font-size:1.9rem; font-weight:700; line-height:1.1; margin-top:2px;
+    font-variant-numeric:tabular-nums; color:var(--bs-body-color); }
+  .kpi .sub { font-size:.72rem; color:var(--bs-secondary-color); }
+  .kpi .bar { position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--acc-cyan); }
+  .kpi.red .bar{background:var(--acc-red)} .kpi.red .val{color:var(--acc-red)}
+  .kpi.amber .bar{background:var(--acc-amber)} .kpi.amber .val{color:var(--acc-amber)}
+  .kpi.green .bar{background:var(--acc-green)} .kpi.green .val{color:var(--acc-green)}
+  .kpi.cyan .bar{background:var(--acc-cyan)} .kpi.cyan .val{color:var(--acc-cyan)}
+  .kpi.violet .bar{background:var(--acc-violet)}
+  .panel { border:1px solid var(--bs-border-color); border-radius:12px;
+    background:var(--bs-body-bg); padding:16px; height:100%; }
+  .soc table { font-variant-numeric:tabular-nums; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; }
+</style>
+
+<div class="soc">
+
+  <!-- filter bar -->
+  <form method="get" class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <span class="h5 mb-0 me-2">🛰️ SOC Overview</span>
+    <span class="badge text-bg-secondary">{{ filters.site }} · {{ filters.range }}</span>
+    <div class="ms-auto d-flex align-items-center gap-2">
+      <select name="site" class="form-select form-select-sm w-auto">
+        <option value="All" {% if filters.site == 'All' %}selected{% endif %}>All sites</option>
+        {% for s in filters.sites %}<option value="{{ s }}" {% if filters.site == s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+      <select name="range" class="form-select form-select-sm w-auto">
+        <option value="1h"  {% if filters.range == '1h' %}selected{% endif %}>1 hour</option>
+        <option value="24h" {% if filters.range == '24h' %}selected{% endif %}>24 hours</option>
+        <option value="7d"  {% if filters.range == '7d' %}selected{% endif %}>7 days</option>
+      </select>
+      <button class="btn btn-sm btn-primary">Apply</button>
+    </div>
+  </form>
+
+  <!-- KPI strip -->
+  <div class="row g-2 mb-3">
+    <div class="col-6 col-md-4 col-xl-2">
+      <a class="kpi cyan" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ overall_q }}">
+        <span class="bar"></span><div class="lab">Onboarded devices</div>
+        <div class="val">{{ widgets.total_devices }}</div><div class="sub">ISE inventory</div></a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <a class="kpi red" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ overall_q }}">
+        <span class="bar"></span><div class="lab">Devices at risk</div>
+        <div class="val">{{ widgets.at_risk }}</div><div class="sub">Medium+ threats</div></a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <a class="kpi amber" href="{% url 'dashboard:dataset' 'ise-quarantined' %}?{{ overall_q }}">
+        <span class="bar"></span><div class="lab">Quarantined</div>
+        <div class="val">{{ widgets.quarantined }}</div><div class="sub">In quarantine rule</div></a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <a class="kpi" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}&amp;threats=1">
+        <span class="bar"></span><div class="lab">Threat events</div>
+        <div class="val">{{ widgets.threats_window }}</div><div class="sub">{{ filters.range }}</div></a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <a class="kpi red" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}&amp;severity=Critical&amp;threats=1">
+        <span class="bar"></span><div class="lab">Critical</div>
+        <div class="val">{{ widgets.critical }}</div><div class="sub">Highest severity</div></a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+      <div class="kpi {% if compliance.score >= 90 %}green{% elif compliance.score >= 70 %}amber{% else %}red{% endif %}">
+        <span class="bar"></span><div class="lab">Compliance</div>
+        <div class="val">{{ compliance.score }}%</div>
+        <div class="sub">{{ compliance.compliant }} / {{ compliance.total }} ok</div></div>
+    </div>
+  </div>
+
+  <!-- charts -->
+  <div class="row g-3 mb-3">
+    <div class="col-lg-4">
+      <div class="panel">
+        <h6 class="sec d-flex justify-content-between">Attack severity
+          <span class="btn-group btn-group-sm" role="group">
+            <button type="button" class="btn btn-outline-secondary active" onclick="sevToggle('sevSoc','doughnut',this)">Pie</button>
+            <button type="button" class="btn btn-outline-secondary" onclick="sevToggle('sevSoc','bar',this)">Bar</button>
+          </span></h6>
+        <canvas id="sevSoc" height="200"></canvas>
+      </div>
+    </div>
+    <div class="col-lg-8">
+      <div class="panel">
+        <h6 class="sec">Traffic &amp; threat trend — {{ filters.range }}</h6>
+        <canvas id="trendSoc" height="110"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- device-type table -->
+  <div class="panel">
+    <h6 class="sec mb-2">Device types — ranked by threats</h6>
+    <div class="table-responsive">
+      <table class="table table-sm table-hover align-middle mb-0">
+        <thead><tr>
+          <th>Device type</th><th class="text-end">Devices</th>
+          <th class="text-end">At risk</th><th class="text-end">Quarantined</th>
+          <th class="text-end">Threats</th><th class="text-end">Critical</th>
+          <th class="text-end">Compliance</th>
+        </tr></thead>
+        <tbody>
+          {% for t in leaderboard %}
+          <tr>
+            <td class="fw-semibold">{{ t.device_type }}</td>
+            <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ t.q }}">{{ t.devices }}</a></td>
+            <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ t.q }}">{{ t.at_risk }}</a></td>
+            <td class="text-end">{{ t.quarantined }}</td>
+            <td class="text-end fw-semibold" style="color:var(--acc-red)"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;threats=1">{{ t.threats }}</a></td>
+            <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;severity=Critical&amp;threats=1">{{ t.critical }}</a></td>
+            <td class="text-end fw-semibold {% if t.compliance >= 90 %}text-success{% elif t.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ t.compliance }}%</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  const sevColors = {Critical:'#ef4444',High:'#f59e0b',Medium:'#22d3ee',Low:'#6c757d',Informational:'#adb5bd'};
+  const sevCharts = {}, sevStore = {};
+  function gridColor(){ return getComputedStyle(document.documentElement)
+    .getPropertyValue('--bs-border-color') || 'rgba(128,128,128,.2)'; }
+  function renderSev(id, kind){
+    const el=document.getElementById(id); if(!el) return;
+    const data=sevStore[id]||[]; if(sevCharts[id]) sevCharts[id].destroy();
+    const labels=data.map(s=>s.severity), vals=data.map(s=>s.count), colors=data.map(s=>sevColors[s.severity]);
+    sevCharts[id]=new Chart(el, kind==='bar'
+      ? {type:'bar', data:{labels,datasets:[{data:vals,backgroundColor:colors}]},
+         options:{plugins:{legend:{display:false}},scales:{y:{beginAtZero:true,grid:{color:gridColor()}},x:{grid:{display:false}}}}}
+      : {type:'doughnut', data:{labels,datasets:[{data:vals,backgroundColor:colors}]},
+         options:{plugins:{legend:{position:'bottom'}}}});
+  }
+  function sevToggle(id,kind,btn){ renderSev(id,kind);
+    if(btn){btn.parentElement.querySelectorAll('button').forEach(b=>b.classList.remove('active'));btn.classList.add('active');} }
+  function soctrend(id, points){
+    const el=document.getElementById(id); if(!el) return;
+    new Chart(el,{ data:{labels:points.map(p=>p.display), datasets:[
+        {type:'bar',label:'Traffic (MB)',yAxisID:'y',data:points.map(p=>p.traffic_mb),backgroundColor:'rgba(34,211,238,.35)'},
+        {type:'line',label:'Threats',yAxisID:'y1',data:points.map(p=>p.threats),borderColor:'#ef4444',backgroundColor:'#ef4444',tension:.3}
+      ]},
+      options:{plugins:{legend:{labels:{boxWidth:12}}},scales:{
+        y:{position:'left',grid:{color:gridColor()}}, x:{grid:{display:false}},
+        y1:{position:'right',grid:{drawOnChartArea:false}} }} });
+  }
+  sevStore['sevSoc'] = {{ severity_json|safe }};
+  renderSev('sevSoc','doughnut');
+  soctrend('trendSoc', {{ trend_json|safe }});
+</script>
+{% endblock %}
