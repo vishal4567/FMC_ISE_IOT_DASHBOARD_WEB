@@ -54,11 +54,14 @@ def index(request):
     # "Devices" = ISE onboarded inventory for the type (not FMC-seen MACs). Keep
     # the FMC-active count too, for context.
     ise_counts = analytics.ise_type_counts(site=site)
+    quar_counts = analytics.quarantined_type_counts(site=site)
     for r in leaderboard:
         r["active_devices"] = r["devices"]
         r["devices"] = ise_counts.get(r["device_type"], r["devices"])
-        _risk = min(r.get("at_risk", 0), r["devices"])
-        r["compliance"] = round(100 * (r["devices"] - _risk) / r["devices"]) \
+        r["quarantined"] = quar_counts.get(r["device_type"], 0)
+        # non-compliant = at-risk OR quarantined (approx union, capped)
+        _nc = min(r["devices"], r.get("at_risk", 0) + r["quarantined"])
+        r["compliance"] = round(100 * (r["devices"] - _nc) / r["devices"]) \
             if r["devices"] else 100
 
     # ===== Dashboard 2 - one DEVICE TYPE (default = most threats) =====
@@ -73,16 +76,18 @@ def index(request):
     sum_type = (analytics.summary(hours=hours, site=site, device_type=selected)
                 if selected else {})
 
-    _t_dev = ise_counts.get(selected, 0)
-    _t_risk = min(sum_type.get("devices_at_risk", 0), _t_dev)
+    type_comp = (analytics.compliance(hours=hours, site=site, device_type=selected)
+                 if selected else {"total": 0, "at_risk": 0, "quarantined": 0,
+                                   "score": 100})
     type_metrics = {
-        "devices": _t_dev,
-        "at_risk": sum_type.get("devices_at_risk", 0),
+        "devices": type_comp["total"],
+        "at_risk": type_comp["at_risk"],
+        "quarantined": type_comp["quarantined"],
         "threats": t_row["threats"] if t_row else 0,
         "critical": t_row["critical"] if t_row else 0,
         "traffic_mb": t_row["traffic_mb"] if t_row else 0,
         "pct_blocked": t_row["pct_blocked"] if t_row else 0,
-        "compliance": round(100 * (_t_dev - _t_risk) / _t_dev) if _t_dev else 100,
+        "compliance": type_comp["score"],
     }
 
     context = {

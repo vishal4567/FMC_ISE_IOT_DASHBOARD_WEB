@@ -292,30 +292,51 @@ def ise_device_count(site=None):
     return _iot_qs(site).count()
 
 
-def quarantined_qs(site=None):
+def quarantined_qs(site=None, device_type=None):
     """IoT devices in a QUARANTINE authorization rule (authorization_profile
     holds the RADIUS authorization_rule; a value containing 'Quarantine' marks a
-    quarantined device). Site-aware."""
-    return _iot_qs(site).filter(authorization_profile__icontains="quarantine")
+    quarantined device). Site/type-aware."""
+    qs = _iot_qs(site).filter(authorization_profile__icontains="quarantine")
+    if device_type and device_type != SITES_ALL:
+        qs = qs.filter(device_type=device_type)
+    return qs
 
 
-def quarantined_count(site=None):
-    return quarantined_qs(site).count()
+def quarantined_count(site=None, device_type=None):
+    return quarantined_qs(site, device_type).count()
+
+
+def quarantined_type_counts(site=None):
+    """{device_type: quarantined device count} from the ISE inventory."""
+    from django.db.models import Count
+
+    return {r["device_type"]: r["n"] for r in
+            quarantined_qs(site).values("device_type").annotate(n=Count("id"))}
 
 
 def compliance(hours=None, site=None, device_type=None):
-    """Compliance = devices NOT at risk. A device is compliant when it has no
-    threat events in the window. score = (total - at_risk) / total * 100, over
-    the ISE onboarded inventory (site/type-aware)."""
-    qs = _iot_qs(site)
+    """Compliance = devices that are NEITHER at risk NOR quarantined.
+    Non-compliant = union of (a) devices with a Medium+ threat event in the
+    window and (b) devices in a QUARANTINE authorization rule - counted as
+    distinct MACs so a device that is both isn't double-counted. Over the ISE
+    onboarded inventory (site/type-aware)."""
+    inv = _iot_qs(site)
     if device_type and device_type != SITES_ALL:
-        qs = qs.filter(device_type=device_type)
-    total = qs.count()
-    at_risk = min(summary(hours, site, device_type)["devices_at_risk"], total)
-    compliant = max(0, total - at_risk)
+        inv = inv.filter(device_type=device_type)
+    total = inv.count()
+
+    at_risk_macs = {m for m in _base_qs(hours, site, device_type)
+                    .filter(_threat_q()).exclude(device_mac="")
+                    .values_list("device_mac", flat=True).distinct() if m}
+    quar_macs = set(inv.filter(authorization_profile__icontains="quarantine")
+                    .values_list("mac", flat=True))
+    non_compliant = min(total, len(at_risk_macs | quar_macs))
+    compliant = max(0, total - non_compliant)
     return {
         "total": total,
-        "at_risk": at_risk,
+        "at_risk": len(at_risk_macs),
+        "quarantined": len(quar_macs),
+        "non_compliant": non_compliant,
         "compliant": compliant,
         "score": round(100 * compliant / total) if total else 100,
     }

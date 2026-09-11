@@ -87,7 +87,7 @@
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">Compliance Score</div>
         <div class="display-5 fw-bold {% if compliance.score >= 90 %}text-success{% elif compliance.score >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ compliance.score }}%</div>
-        <div class="small text-muted">{{ compliance.compliant }} / {{ compliance.total }} not at risk</div>
+        <div class="small text-muted">{{ compliance.compliant }} / {{ compliance.total }} compliant · {{ compliance.quarantined }} quarantined</div>
       </div></div>
     </a>
   </div>
@@ -217,6 +217,9 @@
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ type_q }}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">At Risk</div>
       <div class="h2 mb-0 text-danger">{{ type_metrics.at_risk }}</div></div></div></a></div>
+    <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-quarantined' %}?{{ type_q }}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
+      <div class="text-muted small text-uppercase">Quarantined</div>
+      <div class="h2 mb-0 text-warning">{{ type_metrics.quarantined }}</div></div></div></a></div>
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Threat Events</div>
       <div class="h2 mb-0">{{ type_metrics.threats }}</div></div></div></a></div>
