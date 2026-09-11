@@ -44,7 +44,7 @@
       <h6 class="card-title"><span class="badge bg-info">ISE</span> Identity &amp; Correlation</h6>
       <table class="table table-sm mb-0">
         <tr><th>Correlation</th><td>
-          {% if d.ise.correlation == 'Matched (same MAC)' %}<span class="badge bg-success">Matched (same MAC)</span>
+          {% if 'Matched' in d.ise.correlation %}<span class="badge bg-success">Matched (in ISE)</span>
           {% elif d.ise.correlation == 'Manually mapped' %}<span class="badge bg-primary">Manually mapped</span>
           {% else %}<span class="badge bg-secondary">FMC-only</span>{% endif %}
         </td></tr>
