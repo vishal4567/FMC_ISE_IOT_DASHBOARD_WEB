@@ -69,6 +69,10 @@ case "${1:-}" in
     need_root
     start reenrich "$PY $APP_DIR/manage.py reenrich_events"
     ;;
+  purge)
+    need_root
+    start purge "$PY $APP_DIR/manage.py purge_events --days ${2:-7}"
+    ;;
   rebaseline)
     need_root
     # TRUE full replace (manual): authz-rule sync + FORCED prune (guard off),
@@ -97,7 +101,7 @@ case "${1:-}" in
     systemctl list-units "${PREFIX}-*" --all --no-pager
     ;;
   *)
-    echo "usage: sudo bash $0 {sync|fast|fast-add|authzrule|authzrule-add|reenrich|rebaseline|restamp|both|status [name]|logs <name>|stop <name>|list}"
+    echo "usage: sudo bash $0 {sync|fast|fast-add|authzrule|authzrule-add|reenrich|rebaseline|purge [days]|restamp|both|status [name]|logs <name>|stop <name>|list}"
     exit 1
     ;;
 esac
