@@ -471,7 +471,13 @@ def device_360(mac):
     if not events:
         return {"found": False, "mac": mac}
 
-    threats = [e for e in events if e["event_type"] != "Connection"]
+    # a threat = non-Connection AND severity Medium+ (Low/Informational excluded),
+    # consistent with the dashboard's threat definition.
+    def _is_threat(e):
+        return (e["event_type"] != "Connection"
+                and e.get("severity") in THREAT_SEVERITIES)
+
+    threats = [e for e in events if _is_threat(e)]
     ev_sorted = sorted(events, key=lambda e: e["_ts"])
     first = ev_sorted[0]
 
@@ -503,7 +509,7 @@ def device_360(mac):
     for e in events:
         day = e["timestamp"][:10]
         if day in daily:
-            if e["event_type"] != "Connection":
+            if _is_threat(e):
                 daily[day]["threats"] += 1
             daily[day]["traffic_mb"] += (e.get("total_bytes") or 0) / 1_000_000
     for d in daily.values():
