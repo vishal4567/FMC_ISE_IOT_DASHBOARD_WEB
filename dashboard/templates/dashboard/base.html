@@ -95,6 +95,8 @@
         <span class="ico">🗺️</span><span class="label">Site Mapping</span></a>
       <a class="nav-link {% if url == 'config_settings' %}active{% endif %}" href="{% url 'dashboard:config_settings' %}" title="Settings">
         <span class="ico">⚙️</span><span class="label">Settings</span></a>
+      <a class="nav-link {% if url == 'config_users' %}active{% endif %}" href="{% url 'dashboard:config_users' %}" title="Users">
+        <span class="ico">👥</span><span class="label">Users</span></a>
       {% endif %}
 
       {% if user.is_authenticated %}

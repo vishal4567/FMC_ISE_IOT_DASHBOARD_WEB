@@ -1,0 +1,121 @@
+{% extends "dashboard/base.html" %}
+{% block title %}Config · Users{% endblock %}
+
+{% block content %}
+<div class="d-flex align-items-center mb-3">
+  <h4 class="mb-0">⚙ User Management</h4>
+  <span class="badge bg-secondary ms-2">{{ users|length }} user(s)</span>
+</div>
+
+{% if msg %}<div class="alert alert-success py-2">{{ msg }}</div>{% endif %}
+{% if err %}<div class="alert alert-danger py-2">{{ err }}</div>{% endif %}
+
+<!-- Add user -->
+<form method="post" class="card shadow-sm mb-3">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="add">
+  <div class="card-body py-3 d-flex flex-wrap align-items-end gap-2">
+    <div>
+      <label class="form-label small mb-0 text-muted">Username</label>
+      <input class="form-control form-control-sm" name="username" required
+             placeholder="jdoe" style="min-width:180px">
+    </div>
+    <div>
+      <label class="form-label small mb-0 text-muted">Password</label>
+      <input class="form-control form-control-sm" name="password" type="password"
+             required placeholder="min 8 chars" style="min-width:200px">
+    </div>
+    <div>
+      <label class="form-label small mb-0 text-muted">Role</label>
+      <select class="form-select form-select-sm" name="role" style="min-width:140px">
+        <option value="viewer">viewer (read-only)</option>
+        <option value="admin">admin (can edit)</option>
+      </select>
+    </div>
+    <button class="btn btn-sm btn-success">+ Add user</button>
+  </div>
+</form>
+
+<!-- Users table -->
+<div class="card shadow-sm">
+  <div class="table-responsive">
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead class="table-dark">
+        <tr>
+          <th>Username</th><th>Role</th><th>Status</th><th>Last login</th>
+          <th class="text-end">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td class="fw-semibold">{{ u.username }}
+            {% if u.id == request.user.id %}<span class="badge bg-light text-dark ms-1">you</span>{% endif %}
+          </td>
+          <td>
+            {% if u.is_staff %}<span class="badge bg-info text-dark">admin</span>
+            {% else %}<span class="badge bg-secondary">viewer</span>{% endif %}
+          </td>
+          <td>
+            {% if u.is_active %}<span class="text-success">● active</span>
+            {% else %}<span class="text-muted">○ disabled</span>{% endif %}
+          </td>
+          <td class="small text-muted">{{ u.last_login|default:"never" }}</td>
+          <td class="text-end">
+            <div class="d-inline-flex gap-1 flex-wrap justify-content-end">
+              <!-- toggle role -->
+              <form method="post" class="m-0">{% csrf_token %}
+                <input type="hidden" name="action" value="role">
+                <input type="hidden" name="id" value="{{ u.id }}">
+                <input type="hidden" name="role" value="{% if u.is_staff %}viewer{% else %}admin{% endif %}">
+                <button class="btn btn-outline-secondary btn-sm"
+                        {% if u.id == request.user.id and u.is_staff %}disabled title="can't change your own role"{% endif %}>
+                  {% if u.is_staff %}→ viewer{% else %}→ admin{% endif %}
+                </button>
+              </form>
+              <!-- reset password -->
+              <button class="btn btn-outline-primary btn-sm" data-bs-toggle="collapse"
+                      data-bs-target="#pw-{{ u.id }}">Reset PW</button>
+              <!-- deactivate -->
+              <form method="post" class="m-0">{% csrf_token %}
+                <input type="hidden" name="action" value="toggle_active">
+                <input type="hidden" name="id" value="{{ u.id }}">
+                <button class="btn btn-outline-warning btn-sm"
+                        {% if u.id == request.user.id %}disabled{% endif %}>
+                  {% if u.is_active %}Disable{% else %}Enable{% endif %}
+                </button>
+              </form>
+              <!-- delete -->
+              <form method="post" class="m-0"
+                    onsubmit="return confirm('Delete user {{ u.username }}?');">{% csrf_token %}
+                <input type="hidden" name="action" value="delete">
+                <input type="hidden" name="id" value="{{ u.id }}">
+                <button class="btn btn-outline-danger btn-sm"
+                        {% if u.id == request.user.id %}disabled{% endif %}>Delete</button>
+              </form>
+            </div>
+            <!-- reset-password inline form -->
+            <div class="collapse mt-2" id="pw-{{ u.id }}">
+              <form method="post" class="d-flex gap-1 justify-content-end">{% csrf_token %}
+                <input type="hidden" name="action" value="reset">
+                <input type="hidden" name="id" value="{{ u.id }}">
+                <input class="form-control form-control-sm" name="password"
+                       type="password" required placeholder="new password"
+                       style="max-width:220px">
+                <button class="btn btn-sm btn-primary">Set</button>
+              </form>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<p class="text-muted small mt-3">
+  <strong>admin</strong> = can change configuration (Config / Settings / Users).
+  <strong>viewer</strong> = read-only. Self-lockout is prevented (you can't
+  delete, disable, or demote your own account, or remove the last admin).
+</p>
+{% endblock %}

@@ -19,6 +19,7 @@ urlpatterns = [
     path("readiness/", views.policy_readiness, name="readiness"),
     path("config/site-mapping/", views.config_sites, name="config_sites"),
     path("config/settings/", views.config_settings, name="config_settings"),
+    path("config/users/", views.config_users, name="config_users"),
     path("dataset/<slug:key>/", views.dataset_table, name="dataset"),
     path("dataset/<slug:key>.json", views.dataset_json, name="dataset_json"),
     path("dataset/<slug:key>/export.csv", views.dataset_csv, name="dataset_csv"),

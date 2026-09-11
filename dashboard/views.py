@@ -443,3 +443,91 @@ def config_settings(request):
         "event_count": SecurityEvent.objects.count(),
     }
     return render(request, "dashboard/config_settings.html", context)
+
+
+@admin_required
+def config_users(request):
+    """Admin-only user management: list / add / delete users, set role
+    (admin vs viewer) and reset passwords. Self-lockout guards included."""
+    from django.contrib.auth import get_user_model
+    from django.contrib.auth.password_validation import validate_password
+    from django.core.exceptions import ValidationError
+
+    User = get_user_model()
+
+    def redir(msg=None, err=None):
+        from urllib.parse import urlencode
+        q = urlencode({k: v for k, v in {"msg": msg, "err": err}.items() if v})
+        return redirect(f"{request.path}?{q}" if q else request.path)
+
+    if request.method == "POST":
+        action = request.POST.get("action")
+        uid = request.POST.get("id")
+        target = User.objects.filter(id=uid).first() if uid else None
+        is_self = target and target.id == request.user.id
+        admin_count = User.objects.filter(is_staff=True, is_active=True).count()
+
+        if action == "add":
+            username = (request.POST.get("username") or "").strip()
+            password = request.POST.get("password") or ""
+            make_admin = request.POST.get("role") == "admin"
+            if not username:
+                return redir(err="Username is required.")
+            if User.objects.filter(username=username).exists():
+                return redir(err=f"User '{username}' already exists.")
+            try:
+                validate_password(password)
+            except ValidationError as e:
+                return redir(err="Password: " + " ".join(e.messages))
+            u = User(username=username, is_staff=make_admin, is_active=True)
+            u.set_password(password)
+            u.save()
+            return redir(msg=f"Created {'admin' if make_admin else 'viewer'} '{username}'.")
+
+        if not target:
+            return redir(err="User not found.")
+
+        if action == "delete":
+            if is_self:
+                return redir(err="You cannot delete your own account.")
+            if target.is_staff and admin_count <= 1:
+                return redir(err="Cannot delete the last admin.")
+            name = target.username
+            target.delete()
+            return redir(msg=f"Deleted '{name}'.")
+
+        if action == "role":
+            make_admin = request.POST.get("role") == "admin"
+            if is_self and not make_admin:
+                return redir(err="You cannot remove your own admin rights.")
+            if target.is_staff and not make_admin and admin_count <= 1:
+                return redir(err="Cannot demote the last admin.")
+            target.is_staff = make_admin
+            target.save(update_fields=["is_staff"])
+            return redir(msg=f"{target.username} is now {'admin' if make_admin else 'viewer'}.")
+
+        if action == "reset":
+            password = request.POST.get("password") or ""
+            try:
+                validate_password(password, user=target)
+            except ValidationError as e:
+                return redir(err="Password: " + " ".join(e.messages))
+            target.set_password(password)
+            target.save(update_fields=["password"])
+            return redir(msg=f"Password reset for '{target.username}'.")
+
+        if action == "toggle_active":
+            if is_self:
+                return redir(err="You cannot deactivate your own account.")
+            target.is_active = not target.is_active
+            target.save(update_fields=["is_active"])
+            return redir(msg=f"{target.username} {'activated' if target.is_active else 'deactivated'}.")
+
+        return redir(err="Unknown action.")
+
+    context = {
+        "msg": request.GET.get("msg"),
+        "err": request.GET.get("err"),
+        "users": User.objects.order_by("-is_staff", "username"),
+    }
+    return render(request, "dashboard/config_users.html", context)
