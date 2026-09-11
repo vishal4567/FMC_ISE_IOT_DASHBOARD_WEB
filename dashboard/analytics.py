@@ -325,17 +325,23 @@ def compliance(hours=None, site=None, device_type=None):
         inv = inv.filter(device_type=device_type)
     total = inv.count()
 
-    at_risk_macs = {m for m in _base_qs(hours, site, device_type)
-                    .filter(_threat_q()).exclude(device_mac="")
-                    .values_list("device_mac", flat=True).distinct() if m}
-    quar_macs = set(inv.filter(authorization_profile__icontains="quarantine")
-                    .values_list("mac", flat=True))
-    non_compliant = min(total, len(at_risk_macs | quar_macs))
+    # at-risk = distinct MACs with a Medium+ threat (one COUNT DISTINCT in the DB,
+    # not a Python set). quarantined = inventory count. To union without a big
+    # set, subtract the overlap (quarantined MACs that ALSO have a threat) - the
+    # quarantined list is small, so that IN-filtered count is cheap.
+    threat_qs = _base_qs(hours, site, device_type).filter(_threat_q())
+    at_risk = threat_qs.exclude(device_mac="").values("device_mac").distinct().count()
+    quar_macs = list(inv.filter(authorization_profile__icontains="quarantine")
+                     .values_list("mac", flat=True))
+    quarantined = len(quar_macs)
+    overlap = (threat_qs.filter(device_mac__in=quar_macs)
+               .values("device_mac").distinct().count()) if quar_macs else 0
+    non_compliant = min(total, at_risk + quarantined - overlap)
     compliant = max(0, total - non_compliant)
     return {
         "total": total,
-        "at_risk": len(at_risk_macs),
-        "quarantined": len(quar_macs),
+        "at_risk": at_risk,
+        "quarantined": quarantined,
         "non_compliant": non_compliant,
         "compliant": compliant,
         "score": round(100 * compliant / total) if total else 100,
@@ -429,14 +435,11 @@ def correlate_to_ise():
 def correlation_summary():
     """Distinct FMC-seen devices vs the ISE inventory — counted in the DB, no
     per-event scan."""
-    from dashboard.models import IoTDevice
-
-    fmc_macs = {m.upper() for m in _base_qs()
-                .values_list("device_mac", flat=True).distinct() if m}
-    ise_macs = {m.upper() for m in
-                IoTDevice.objects.values_list("mac", flat=True) if m}
-    total = len(fmc_macs)
-    matched = len(fmc_macs & ise_macs)
+    # in_ise is stamped on each event at ingest, so distinct-MAC counts come
+    # straight from the DB (two COUNT DISTINCTs) - no pulling MAC sets into Python.
+    base = _base_qs().exclude(device_mac="")
+    total = base.values("device_mac").distinct().count()
+    matched = base.filter(in_ise=True).values("device_mac").distinct().count()
     return {
         "total": total,
         "matched": matched,
