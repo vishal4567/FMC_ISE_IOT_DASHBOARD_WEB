@@ -1,7 +1,7 @@
 from django.contrib.auth import views as auth_views
 from django.urls import path
 
-from . import views
+from . import sso, views
 
 app_name = "dashboard"
 
@@ -10,6 +10,8 @@ urlpatterns = [
         template_name="dashboard/login.html", redirect_authenticated_user=True),
         name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
+    path("auth/azure/login/", sso.azure_login, name="azure_login"),
+    path("auth/azure/callback/", sso.azure_callback, name="azure_callback"),
     path("", views.index, name="index"),
     path("soc/", views.soc_dashboard, name="soc"),
     path("reports/", views.reports, name="reports"),

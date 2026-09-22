@@ -3,3 +3,6 @@
 Django>=5.0,<6.0
 requests>=2.31
 python-dotenv>=1.0
+# Azure AD / Entra ID SSO (OpenID Connect). Optional - only needed when
+# AZURE_AD_ENABLED=true; the app imports it lazily.
+msal>=1.28

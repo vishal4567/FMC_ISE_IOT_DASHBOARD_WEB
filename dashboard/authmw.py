@@ -24,6 +24,8 @@ class LoginRequiredMiddleware:
         static_url = settings.STATIC_URL or "/static/"
         if path.startswith(static_url) or path in ("/healthz", "/healthz/"):
             return True
+        if path.startswith("/auth/"):   # SSO login / callback endpoints
+            return True
         # the login/logout endpoints themselves
         for name in ("dashboard:login", "dashboard:logout"):
             try:

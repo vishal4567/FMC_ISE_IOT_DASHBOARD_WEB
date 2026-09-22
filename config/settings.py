@@ -84,6 +84,27 @@ AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
 ]
 
+# ---------------------------------------------------------------------------
+# Azure AD / Entra ID SSO (OpenID Connect via MSAL). Optional - enabled only
+# when configured; local username/password login always remains available.
+# ---------------------------------------------------------------------------
+AZURE_AD = {
+    "ENABLED": _env_bool("AZURE_AD_ENABLED", False),
+    "TENANT_ID": os.environ.get("AZURE_AD_TENANT_ID", ""),
+    "CLIENT_ID": os.environ.get("AZURE_AD_CLIENT_ID", ""),
+    "CLIENT_SECRET": os.environ.get("AZURE_AD_CLIENT_SECRET", ""),
+    # public base URL of this app, used to build the redirect URI, e.g.
+    # https://iotdash.example.com  (no trailing slash)
+    "REDIRECT_BASE": os.environ.get("AZURE_AD_REDIRECT_BASE", ""),
+    # Entra group OBJECT ID (or app-role value) that grants admin (is_staff).
+    # Leave blank -> every SSO user is a viewer (promote via User Management).
+    "ADMIN_GROUP": os.environ.get("AZURE_AD_ADMIN_GROUP", ""),
+    # Optional: restrict sign-in to this email domain (e.g. wipro.com).
+    "ALLOWED_DOMAIN": os.environ.get("AZURE_AD_ALLOWED_DOMAIN", ""),
+    # auto-create a Django user on first SSO login
+    "AUTO_CREATE": _env_bool("AZURE_AD_AUTO_CREATE", True),
+}
+
 try:  # optional prod dependency
     import whitenoise  # noqa: F401
 
@@ -107,6 +128,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "dashboard.context_processors.device_search",
+                "dashboard.context_processors.sso_flags",
             ],
         },
     },

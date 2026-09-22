@@ -13,3 +13,10 @@ def device_search(request):
         return {"nav_device_options": options}
     except Exception:
         return {"nav_device_options": []}
+
+
+def sso_flags(request):
+    """Expose whether Azure AD SSO is configured, for the login page button."""
+    from django.conf import settings
+    az = getattr(settings, "AZURE_AD", {})
+    return {"azure_sso_enabled": bool(az.get("ENABLED") and az.get("CLIENT_ID"))}
