@@ -107,6 +107,7 @@ class Command(BaseCommand):
                   f"AND e.device_mac<>'' AND upper(e.device_mac)=d.mac")
 
         processed = 0
+        self._last_step = -1
         with connection.cursor() as cur:
             b = lo
             while b <= hi:
@@ -119,22 +120,39 @@ class Command(BaseCommand):
                     cur.execute(by_mac, [b, top, *tp])
                 done_ids = min(top, hi + 1) - lo
                 pct = int(100 * done_ids / total_ids)
-                fill = pct * 30 // 100
-                rate = processed / (time.time() - t0) if time.time() > t0 else 0
-                # newline every ~10% so journald (detached runs) shows progress too
-                end = "\n" if pct % 10 == 0 else ""
-                sys.stdout.write(
-                    f"\r[{'#' * fill}{'.' * (30 - fill)}] {pct:3d}%  "
-                    f"{processed:,} rows  {rate:,.0f}/s   {end}")
-                sys.stdout.flush()
+                self._progress(pct, processed, t0)
                 b = top
 
         in_ise = SecurityEvent.objects.filter(in_ise=True)
         if since:
             in_ise = in_ise.filter(ts__gte=since)
         self.stdout.write(self.style.SUCCESS(
-            f"\nre-mapped {processed:,} events in {round(time.time()-t0,1)}s; "
+            f"done: re-mapped {processed:,} events in {round(time.time()-t0,1)}s; "
             f"{in_ise.count():,} now matched to the baseline"))
+
+    # ------------------------------------------------------------------ #
+    def _progress(self, pct, rows, t0):
+        """Progress line. In a terminal, a live single-line bar; in journald
+        (detached runs, no TTY), one clean line each time pct crosses a 5% step -
+        with rate and ETA - instead of carriage-return spam."""
+        elapsed = max(time.time() - t0, 1e-6)
+        rate = rows / elapsed
+        eta = int(elapsed / pct * (100 - pct)) if pct > 0 else 0
+        if sys.stdout.isatty():
+            fill = pct * 30 // 100
+            sys.stdout.write(
+                f"\r[{'#' * fill}{'.' * (30 - fill)}] {pct:3d}%  "
+                f"{rows:,} rows  {rate:,.0f}/s  ETA {eta}s   ")
+            sys.stdout.flush()
+            if pct >= 100:
+                sys.stdout.write("\n")
+        else:
+            step = (pct // 5) * 5
+            if step != getattr(self, "_last_step", -1):
+                self._last_step = step
+                self.stdout.write(
+                    f"[reenrich] {pct:3d}%  {rows:,} rows  "
+                    f"{rate:,.0f}/s  ETA {eta}s")
 
     # ------------------------------------------------------------------ #
     def _python(self, SecurityEvent, since, batch):
@@ -153,6 +171,7 @@ class Command(BaseCommand):
         fields = event_store.REMAP_FIELDS
         done = changed = 0
         t0 = time.time()
+        self._last_step = -1
         buf = []
         for ev in qs.only("id", *fields, "source_ip", "dest_ip").iterator(
                 chunk_size=batch):
@@ -164,14 +183,10 @@ class Command(BaseCommand):
                 changed += len(buf)
                 buf = []
             if done % batch == 0 or done == total:
-                pct = int(100 * done / total)
-                fill = pct * 30 // 100
-                sys.stdout.write(f"\r[{'#' * fill}{'.' * (30 - fill)}] {pct:3d}%  "
-                                 f"{done:,}/{total:,}   ")
-                sys.stdout.flush()
+                self._progress(int(100 * done / total), done, t0)
         if buf:
             SecurityEvent.objects.bulk_update(buf, fields)
             changed += len(buf)
         self.stdout.write(self.style.SUCCESS(
-            f"\nre-mapped {done:,} events, {changed:,} changed, "
+            f"done: re-mapped {done:,} events, {changed:,} changed, "
             f"in {round(time.time()-t0,1)}s"))
