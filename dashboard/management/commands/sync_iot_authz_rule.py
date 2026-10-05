@@ -3,8 +3,10 @@ IoT sync driven by the RADIUS AUTHORIZATION RULE.
 
 Discovers every device whose authorization_rule contains 'IOT' (any case) from
 the full radius_authentications log, taking the LATEST auth row per MAC. Maps:
-    device_type            <- identity_group         (the class, e.g. Wipro_CCTV)
+    device_type            <- endpoint_profile        (the profiler profile; falls
+                                                        back to identity_group)
     ise_profile            <- endpoint_profile        (the profiler policy)
+    ise_identity_group     <- identity_group          (kept as a separate column)
     authorization_profile  <- authorization_rule     (e.g. IOT-CCTV, IOT-Quarantine-Access)
     ip                     <- framed_ip_address
     site                   <- device_name -> site-code map (backup: location leaf)
@@ -127,9 +129,10 @@ class Command(BaseCommand):
                 quarantined += 1
             objs.append(IoTDevice(
                 mac=r["mac"],
-                # device_type = ISE identity group (the real class, e.g.
-                # Wipro_CCTV); endpoint_profile kept in ise_profile.
-                device_type=igroup or profile,
+                # device_type = ISE PROFILER profile (endpoint_profile, e.g.
+                # Axis-Device); fall back to identity group if a device has no
+                # profiler profile so it is never left blank.
+                device_type=profile or igroup,
                 site=site,
                 ip=r.get("ip") or None,
                 ise_profile=profile,
