@@ -39,6 +39,23 @@ def _risk_q():
     return _threat_q() & Q(in_ise=True)
 
 
+# ----- group-by dimension: profiler profile OR ISE identity group -----
+# The dashboard can group/filter device types by either. Both are stamped on
+# every device and event, so switching is just a column choice (no re-sync).
+GROUPBY_PROFILE = "profile"
+GROUPBY_IDENTITY = "identity"
+
+
+def _evt_col(groupby):
+    """SecurityEvent column for the chosen grouping."""
+    return "identity_group" if groupby == GROUPBY_IDENTITY else "device_type"
+
+
+def _dev_col(groupby):
+    """IoTDevice column for the chosen grouping."""
+    return "ise_identity_group" if groupby == GROUPBY_IDENTITY else "device_type"
+
+
 def _events():
     """All recent events as analytics-ready dicts (from the DB)."""
     return event_store.recent_events_as_dicts(days=EVENT_WINDOW_DAYS)
@@ -99,8 +116,10 @@ def _unassigned_q():
     return Q(site__isnull=True) | Q(site="") | Q(site__iexact="All Locations")
 
 
-def _base_qs(hours=None, site=None, device_type=None):
-    """Filtered SecurityEvent queryset (time window + site + device type)."""
+def _base_qs(hours=None, site=None, device_type=None, groupby=GROUPBY_PROFILE):
+    """Filtered SecurityEvent queryset (time window + site + device type). The
+    device-type filter applies to the chosen grouping column (profiler profile
+    or identity group)."""
     from dashboard.models import SecurityEvent
 
     window_h = hours if hours else EVENT_WINDOW_DAYS * 24
@@ -110,7 +129,7 @@ def _base_qs(hours=None, site=None, device_type=None):
         qs = qs.filter(_unassigned_q()) if site == SITE_UNASSIGNED \
             else qs.filter(site=site)
     if device_type and device_type != SITES_ALL:
-        qs = qs.filter(device_type=device_type)
+        qs = qs.filter(**{_evt_col(groupby): device_type})
     return qs
 
 
@@ -154,12 +173,12 @@ def sites():
 _BLOCK = ("Blocked", "Would Block")
 
 
-def devices_at_risk(hours=None, site=None, device_type=None):
+def devices_at_risk(hours=None, site=None, device_type=None, groupby=GROUPBY_PROFILE):
     from django.contrib.postgres.aggregates import BoolOr, StringAgg
     from django.db.models import Count, Max, Q
 
     rows = (
-        _base_qs(hours, site, device_type)
+        _base_qs(hours, site, device_type, groupby)
         .filter(_risk_q())
         .values("device_mac")
         .annotate(
@@ -200,23 +219,23 @@ def devices_at_risk(hours=None, site=None, device_type=None):
     return out
 
 
-def attack_severity(hours=None, site=None, device_type=None):
+def attack_severity(hours=None, site=None, device_type=None, groupby=GROUPBY_PROFILE):
     from django.db.models import Count
 
-    rows = (_base_qs(hours, site, device_type)
+    rows = (_base_qs(hours, site, device_type, groupby)
             .filter(_threat_q())
             .values("severity").annotate(count=Count("id")))
     by = {r["severity"]: r["count"] for r in rows}
     return [{"severity": s, "count": by.get(s, 0)} for s in THREAT_SEVERITIES]
 
 
-def trend(hours=24, site=None, device_type=None):
+def trend(hours=24, site=None, device_type=None, groupby=GROUPBY_PROFILE):
     from django.db.models import Count, Q, Sum
 
     gran, keys, _ = _window(hours)
     # Group by the pre-computed hourly bucket column (UTC string, matches keys);
     # fold to day in Python for the day granularity (few buckets).
-    grouped = (_base_qs(hours, site, device_type)
+    grouped = (_base_qs(hours, site, device_type, groupby)
                .values("hour")
                .annotate(
                    bytes_=Sum("total_bytes"),
@@ -247,12 +266,13 @@ def trend(hours=24, site=None, device_type=None):
     return {"granularity": gran, "points": points}
 
 
-def by_device_type(hours=None, site=None):
+def by_device_type(hours=None, site=None, groupby=GROUPBY_PROFILE):
     from django.db.models import Count, Q, Sum
 
-    rows = (_base_qs(hours, site)
-            .exclude(device_type="")   # drop the FMC-only "(unclassified)" bucket
-            .values("device_type")
+    col = _evt_col(groupby)
+    rows = (_base_qs(hours, site, groupby=groupby)
+            .exclude(**{col: ""})   # drop the FMC-only "(unclassified)" bucket
+            .values(col)
             .annotate(
                 devices=Count("device_mac", distinct=True),
                 at_risk=Count("device_mac", distinct=True, filter=_risk_q()),
@@ -268,7 +288,7 @@ def by_device_type(hours=None, site=None):
         events = r["events"] or 0
         blocked = r["blocked"] or 0
         out.append({
-            "device_type": r["device_type"] or "(unclassified)",
+            "device_type": r[col] or "(unclassified)",
             "devices": r["devices"] or 0,
             "at_risk": r["at_risk"] or 0,
             "events": events,
@@ -300,29 +320,30 @@ def ise_device_count(site=None):
     return _iot_qs(site).count()
 
 
-def quarantined_qs(site=None, device_type=None):
+def quarantined_qs(site=None, device_type=None, groupby=GROUPBY_PROFILE):
     """IoT devices in a QUARANTINE authorization rule (authorization_profile
     holds the RADIUS authorization_rule; a value containing 'Quarantine' marks a
     quarantined device). Site/type-aware."""
     qs = _iot_qs(site).filter(authorization_profile__icontains="quarantine")
     if device_type and device_type != SITES_ALL:
-        qs = qs.filter(device_type=device_type)
+        qs = qs.filter(**{_dev_col(groupby): device_type})
     return qs
 
 
-def quarantined_count(site=None, device_type=None):
-    return quarantined_qs(site, device_type).count()
+def quarantined_count(site=None, device_type=None, groupby=GROUPBY_PROFILE):
+    return quarantined_qs(site, device_type, groupby).count()
 
 
-def quarantined_type_counts(site=None):
-    """{device_type: quarantined device count} from the ISE inventory."""
+def quarantined_type_counts(site=None, groupby=GROUPBY_PROFILE):
+    """{type: quarantined device count} from the ISE inventory (by chosen group)."""
     from django.db.models import Count
 
-    return {r["device_type"]: r["n"] for r in
-            quarantined_qs(site).values("device_type").annotate(n=Count("id"))}
+    col = _dev_col(groupby)
+    return {r[col]: r["n"] for r in
+            quarantined_qs(site).values(col).annotate(n=Count("id"))}
 
 
-def compliance(hours=None, site=None, device_type=None):
+def compliance(hours=None, site=None, device_type=None, groupby=GROUPBY_PROFILE):
     """Compliance = devices that are NEITHER at risk NOR quarantined.
     Non-compliant = union of (a) devices with a Medium+ threat event in the
     window and (b) devices in a QUARANTINE authorization rule - counted as
@@ -330,14 +351,14 @@ def compliance(hours=None, site=None, device_type=None):
     onboarded inventory (site/type-aware)."""
     inv = _iot_qs(site)
     if device_type and device_type != SITES_ALL:
-        inv = inv.filter(device_type=device_type)
+        inv = inv.filter(**{_dev_col(groupby): device_type})
     total = inv.count()
 
     # at-risk = distinct MACs with a Medium+ threat (one COUNT DISTINCT in the DB,
     # not a Python set). quarantined = inventory count. To union without a big
     # set, subtract the overlap (quarantined MACs that ALSO have a threat) - the
     # quarantined list is small, so that IN-filtered count is cheap.
-    threat_qs = _base_qs(hours, site, device_type).filter(_risk_q())
+    threat_qs = _base_qs(hours, site, device_type, groupby).filter(_risk_q())
     at_risk = threat_qs.exclude(device_mac="").values("device_mac").distinct().count()
     quar_macs = list(inv.filter(authorization_profile__icontains="quarantine")
                      .values_list("mac", flat=True))
@@ -356,14 +377,15 @@ def compliance(hours=None, site=None, device_type=None):
     }
 
 
-def ise_type_counts(site=None):
-    """Onboarded IoT-device count per device type, from the ISE inventory
-    (IoTDevice), honoring Site — the authoritative 'how many of this type exist',
-    as opposed to by_device_type()'s 'how many were seen active in FMC events'."""
+def ise_type_counts(site=None, groupby=GROUPBY_PROFILE):
+    """Onboarded IoT-device count per type (chosen grouping), from the ISE
+    inventory (IoTDevice), honoring Site — the authoritative 'how many exist', as
+    opposed to by_device_type()'s 'how many were seen active in FMC events'."""
     from django.db.models import Count
 
-    return {r["device_type"]: r["n"] for r in
-            _iot_qs(site).values("device_type").annotate(n=Count("id"))}
+    col = _dev_col(groupby)
+    return {r[col]: r["n"] for r in
+            _iot_qs(site).values(col).annotate(n=Count("id"))}
 
 
 def insecure_transfers(limit=1000):
@@ -376,10 +398,10 @@ def outside_zone(limit=1000):
             .filter(zone_violation=True).order_by("-ts")[:limit]]
 
 
-def summary(hours=None, site=None, device_type=None):
+def summary(hours=None, site=None, device_type=None, groupby=GROUPBY_PROFILE):
     from django.db.models import Count, Q
 
-    agg = _base_qs(hours, site, device_type).aggregate(
+    agg = _base_qs(hours, site, device_type, groupby).aggregate(
         total_events=Count("id"),
         threat_events=Count("id", filter=_threat_q()),
         blocked=Count("id", filter=Q(action__in=_BLOCK)),

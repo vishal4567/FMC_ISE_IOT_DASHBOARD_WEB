@@ -22,8 +22,16 @@
       <option value="7d"  {% if filters.range == '7d' %}selected{% endif %}>Last 7 days</option>
     </select>
     {% if selected_type %}<input type="hidden" name="type" value="{{ selected_type }}">{% endif %}
+    <input type="hidden" name="groupby" value="{{ groupby }}">
     <button class="btn btn-sm btn-primary ms-1" type="submit">Apply</button>
     <a class="btn btn-sm btn-outline-secondary" href="{% url 'dashboard:index' %}">Clear</a>
+    <span class="ms-3 small text-muted">Group by</span>
+    <div class="btn-group btn-group-sm" role="group">
+      <a class="btn btn-outline-primary {% if groupby != 'identity' %}active{% endif %}"
+         href="?site={{ filters.site|urlencode }}&range={{ filters.range }}&groupby=profile">Profiler profile</a>
+      <a class="btn btn-outline-primary {% if groupby == 'identity' %}active{% endif %}"
+         href="?site={{ filters.site|urlencode }}&range={{ filters.range }}&groupby=identity">Identity group</a>
+    </div>
     <a class="btn btn-sm btn-outline-secondary ms-auto" href="?site={{ filters.site|urlencode }}&range={{ filters.range }}{% if selected_type %}&type={{ selected_type|urlencode }}{% endif %}&refresh=1">↻ Refresh</a>
   </div>
 </form>
@@ -184,7 +192,7 @@
   {% for t in leaderboard %}
   <div class="col-6 col-md-4 col-xl-2">
     <a class="text-decoration-none"
-       href="?site={{ filters.site|urlencode }}&range={{ filters.range }}&type={{ t.device_type|urlencode }}#type-dash">
+       href="?site={{ filters.site|urlencode }}&range={{ filters.range }}&groupby={{ groupby }}&type={{ t.device_type|urlencode }}#type-dash">
       <div class="card widget shadow-sm h-100 {% if selected_type == t.device_type %}border-primary border-3{% endif %}">
         <div class="card-body p-2 text-center">
           <div class="small fw-semibold text-truncate">{{ t.device_type }}</div>

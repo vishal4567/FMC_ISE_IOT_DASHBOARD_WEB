@@ -13,7 +13,8 @@ from django.utils import timezone
 
 # Fields carried on both the model and the analytics dict.
 _FIELDS = [
-    "event_type", "severity", "impact", "device_mac", "device_type", "hostname",
+    "event_type", "severity", "impact", "device_mac", "device_type",
+    "identity_group", "hostname",
     "site", "location", "in_ise", "mapped_ise_mac", "dest_country", "application",
     "protocol", "port", "insecure_protocol", "bytes_sent", "bytes_received",
     "total_bytes", "action", "rule_matched", "ips_policy", "src_zone", "dst_zone",
@@ -85,6 +86,7 @@ def enrich_with_ise(event: dict, ise_map: dict, ip_map: dict | None = None) -> d
             event["device_mac"] = ise.mac
         event["mapped_ise_mac"] = ise.mac
         event["device_type"] = event.get("device_type") or ise.device_type
+        event["identity_group"] = event.get("identity_group") or ise.ise_identity_group
         event["site"] = event.get("site") or ise.site
         if not event.get("hostname"):
             event["hostname"] = ise.hostname
@@ -95,6 +97,7 @@ def enrich_with_ise(event: dict, ise_map: dict, ip_map: dict | None = None) -> d
     else:
         event["in_ise"] = False
         event.setdefault("device_type", "")
+        event.setdefault("identity_group", "")
         event.setdefault("site", "")
     return event
 
@@ -105,8 +108,8 @@ def remap_row(ev, ise_map: dict, ip_map: dict) -> bool:
     Unmatched -> FMC-only (ISE fields cleared, device_ip reverts to source_ip).
     Returns True if any identity field changed (so callers can bulk_update only
     the rows that moved)."""
-    before = (ev.device_mac, str(ev.device_ip), ev.device_type, ev.site,
-              ev.hostname, ev.in_ise, ev.mapped_ise_mac)
+    before = (ev.device_mac, str(ev.device_ip), ev.device_type, ev.identity_group,
+              ev.site, ev.hostname, ev.in_ise, ev.mapped_ise_mac)
     mac = (ev.device_mac or "").upper()
     ise = ise_map.get(mac) if mac and mac != "NONE" else None
     if ise is None:
@@ -120,6 +123,7 @@ def remap_row(ev, ise_map: dict, ip_map: dict) -> bool:
         if not mac or mac == "NONE":
             ev.device_mac = ise.mac
         ev.device_type = ise.device_type or ""
+        ev.identity_group = ise.ise_identity_group or ""
         ev.site = ise.site or ""
         if ise.hostname:
             ev.hostname = ise.hostname
@@ -129,15 +133,16 @@ def remap_row(ev, ise_map: dict, ip_map: dict) -> bool:
         ev.in_ise = False
         ev.mapped_ise_mac = ""
         ev.device_type = ""
+        ev.identity_group = ""
         ev.site = ""
         ev.device_ip = ev.source_ip
-    after = (ev.device_mac, str(ev.device_ip), ev.device_type, ev.site,
-             ev.hostname, ev.in_ise, ev.mapped_ise_mac)
+    after = (ev.device_mac, str(ev.device_ip), ev.device_type, ev.identity_group,
+             ev.site, ev.hostname, ev.in_ise, ev.mapped_ise_mac)
     return after != before
 
 
-REMAP_FIELDS = ["device_mac", "device_ip", "device_type", "site", "hostname",
-                "in_ise", "mapped_ise_mac"]
+REMAP_FIELDS = ["device_mac", "device_ip", "device_type", "identity_group",
+                "site", "hostname", "in_ise", "mapped_ise_mac"]
 
 
 def bulk_ingest(event_dicts: list, batch_size: int = 1000) -> int:
@@ -157,6 +162,7 @@ def bulk_ingest(event_dicts: list, batch_size: int = 1000) -> int:
                 device_mac=e.get("device_mac", ""),
                 device_ip=_ip(e.get("device_ip")),
                 device_type=e.get("device_type", ""),
+                identity_group=e.get("identity_group", ""),
                 hostname=e.get("hostname", ""),
                 site=e.get("site", ""),
                 location=e.get("location", ""),

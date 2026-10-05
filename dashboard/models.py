@@ -24,6 +24,9 @@ class SecurityEvent(models.Model):
     device_mac = models.CharField(max_length=32, db_index=True)
     device_ip = models.GenericIPAddressField(null=True, blank=True)
     device_type = models.CharField(max_length=48, db_index=True, blank=True)
+    # ISE identity group, stamped alongside device_type so the dashboard can
+    # group by profiler profile (device_type) OR identity group on demand.
+    identity_group = models.CharField(max_length=64, db_index=True, blank=True)
     hostname = models.CharField(max_length=64, blank=True)
     site = models.CharField(max_length=48, db_index=True, blank=True)
     location = models.CharField(max_length=128, blank=True)

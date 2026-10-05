@@ -57,7 +57,14 @@
         <option value="24h" {% if filters.range == '24h' %}selected{% endif %}>24 hours</option>
         <option value="7d"  {% if filters.range == '7d' %}selected{% endif %}>7 days</option>
       </select>
+      <input type="hidden" name="groupby" value="{{ groupby }}">
       <button class="btn btn-sm btn-primary">Apply</button>
+      <div class="btn-group btn-group-sm ms-2" role="group">
+        <a class="btn btn-outline-secondary {% if groupby != 'identity' %}active{% endif %}"
+           href="?site={{ filters.site|urlencode }}&range={{ filters.range }}&groupby=profile">Profiler</a>
+        <a class="btn btn-outline-secondary {% if groupby == 'identity' %}active{% endif %}"
+           href="?site={{ filters.site|urlencode }}&range={{ filters.range }}&groupby=identity">Identity</a>
+      </div>
     </div>
   </form>
 
@@ -156,7 +163,7 @@
       <div class="d-flex flex-wrap gap-1">
         {% for ty in types %}
         <a class="btn btn-sm {% if ty == selected_type %}btn-primary{% else %}btn-outline-secondary{% endif %}"
-           href="?site={{ filters.site|urlencode }}&amp;range={{ filters.range }}&amp;type={{ ty|urlencode }}">{{ ty }}</a>
+           href="?site={{ filters.site|urlencode }}&amp;range={{ filters.range }}&amp;groupby={{ groupby }}&amp;type={{ ty|urlencode }}">{{ ty }}</a>
         {% endfor %}
       </div>
     </div>

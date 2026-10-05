@@ -44,10 +44,15 @@ def _dashboard_context(request):
     rng = request.GET.get("range") or "24h"
     hours = {"1h": 1, "24h": 24, "7d": 168}.get(rng, 24)
 
+    # group device types by profiler profile (default) or ISE identity group
+    groupby = request.GET.get("groupby")
+    if groupby not in (analytics.GROUPBY_PROFILE, analytics.GROUPBY_IDENTITY):
+        groupby = analytics.GROUPBY_PROFILE
+
     # Click-through query strings: Dashboard 1 tiles carry ONLY site+time (they
     # are all-devices); Dashboard 2 (device-type) tiles also carry the type.
     from urllib.parse import urlencode
-    overall_q = urlencode({"site": site, "range": rng})
+    overall_q = urlencode({"site": site, "range": rng, "groupby": groupby})
 
     # ===== Heavy analytics, cached in Redis (short TTL) per filter combo =====
     # All the event aggregations below are the expensive part; the same (site,
@@ -58,21 +63,21 @@ def _dashboard_context(request):
 
     type_param = request.GET.get("type") or ""
     ttl = getattr(settings, "DASHBOARD_CACHE_TTL", 45)
-    cache_key = f"dash:v1:{site}|{rng}|{type_param}"
+    cache_key = f"dash:v1:{site}|{rng}|{type_param}|{groupby}"
 
     def _compute():
         total_devices = analytics.ise_device_count(site=site)
         quarantined = analytics.quarantined_count(site=site)
         trend_all = analytics.trend(hours, site=site)
         severity_all = analytics.attack_severity(hours=hours, site=site)
-        leaderboard = analytics.by_device_type(hours=hours, site=site)
+        leaderboard = analytics.by_device_type(hours=hours, site=site, groupby=groupby)
         corr = analytics.correlation_summary()
         sum_all = analytics.summary(hours=hours, site=site)
         comp = analytics.compliance(hours=hours, site=site)
 
         # "Devices" = ISE onboarded inventory for the type (not FMC-seen MACs).
-        ise_counts = analytics.ise_type_counts(site=site)
-        quar_counts = analytics.quarantined_type_counts(site=site)
+        ise_counts = analytics.ise_type_counts(site=site, groupby=groupby)
+        quar_counts = analytics.quarantined_type_counts(site=site, groupby=groupby)
         for r in leaderboard:
             r["active_devices"] = r["devices"]
             r["devices"] = ise_counts.get(r["device_type"], r["devices"])
@@ -82,14 +87,16 @@ def _dashboard_context(request):
                 if r["devices"] else 100
             # per-row click-through scope (site + range + this device type)
             r["q"] = urlencode({"site": site, "range": rng,
-                                "type": r["device_type"]})
+                                "type": r["device_type"], "groupby": groupby})
 
         types = [r["device_type"] for r in leaderboard]  # ordered by threats desc
         selected = type_param if type_param in types else (types[0] if types else None)
         t_row = next((r for r in leaderboard if r["device_type"] == selected), None)
-        t_trend = analytics.trend(hours, site=site, device_type=selected)
-        t_severity = analytics.attack_severity(hours=hours, site=site, device_type=selected)
-        type_comp = (analytics.compliance(hours=hours, site=site, device_type=selected)
+        t_trend = analytics.trend(hours, site=site, device_type=selected, groupby=groupby)
+        t_severity = analytics.attack_severity(hours=hours, site=site,
+                                               device_type=selected, groupby=groupby)
+        type_comp = (analytics.compliance(hours=hours, site=site,
+                                          device_type=selected, groupby=groupby)
                      if selected else {"total": 0, "at_risk": 0, "quarantined": 0,
                                        "score": 100})
         type_metrics = {
@@ -135,7 +142,9 @@ def _dashboard_context(request):
         "correlation": b["corr"],
         "compliance": b["compliance"],
         "overall_q": overall_q,
-        "type_q": urlencode({"site": site, "range": rng, "type": b["selected"] or ""}),
+        "groupby": groupby,
+        "type_q": urlencode({"site": site, "range": rng,
+                             "type": b["selected"] or "", "groupby": groupby}),
         "leaderboard": b["leaderboard"],
         "severity_json": json.dumps(b["severity_all"]),
         "trend_json": json.dumps(b["trend_all"]["points"]),
@@ -161,7 +170,9 @@ def atrisk_partial(request):
         limit = min(int(request.GET.get("limit") or 50), 500)
     except (TypeError, ValueError):
         limit = 50
-    rows = analytics.devices_at_risk(hours=hours, site=site, device_type=dtype)[:limit]
+    groupby = request.GET.get("groupby") or analytics.GROUPBY_PROFILE
+    rows = analytics.devices_at_risk(hours=hours, site=site, device_type=dtype,
+                                     groupby=groupby)[:limit]
     return render(request, "dashboard/_atrisk_table.html", {"rows": rows})
 
 
@@ -305,7 +316,8 @@ def _events_qs(request):
     severity/threats) applied - the source for the sim-events table."""
     from dashboard import analytics
     hours, site, dtype = _scope_params(request)
-    qs = analytics._base_qs(hours=hours, site=site, device_type=dtype)
+    groupby = request.GET.get("groupby") or analytics.GROUPBY_PROFILE
+    qs = analytics._base_qs(hours=hours, site=site, device_type=dtype, groupby=groupby)
     sev = (request.GET.get("severity") or "").strip()
     if sev:
         qs = qs.filter(severity=sev)
@@ -322,7 +334,9 @@ def _live_filtered(key, request):
     hours, site, dtype = _scope_params(request)
     if key == "sim-devices-at-risk":
         from dashboard import analytics
-        return analytics.devices_at_risk(hours=hours, site=site, device_type=dtype)
+        groupby = request.GET.get("groupby") or analytics.GROUPBY_PROFILE
+        return analytics.devices_at_risk(hours=hours, site=site, device_type=dtype,
+                                         groupby=groupby)
 
     if key == "sim-events":
         # Query SecurityEvent live with the SAME filters as the dashboard (site /

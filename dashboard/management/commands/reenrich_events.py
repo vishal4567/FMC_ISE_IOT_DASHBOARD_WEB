@@ -82,20 +82,24 @@ class Command(BaseCommand):
         # precedence: reset -> dest_ip -> source_ip -> MAC (later overrides).
         # UPDATE ... FROM joins each event to its IoTDevice by IP / MAC.
         reset = (f"UPDATE {ev} SET in_ise=false, mapped_ise_mac='', "
-                 f"device_type='', site='', device_ip=source_ip "
+                 f"device_type='', identity_group='', site='', device_ip=source_ip "
                  f"WHERE id>=%s AND id<%s{tw}")
         by_ip = (lambda col:
                  f"UPDATE {ev} AS e SET in_ise=true, mapped_ise_mac=d.mac, "
                  f"device_mac=CASE WHEN e.device_mac='' OR upper(e.device_mac)='NONE' "
                  f"THEN d.mac ELSE e.device_mac END, "
-                 f"device_type=COALESCE(d.device_type,''), site=COALESCE(d.site,''), "
+                 f"device_type=COALESCE(d.device_type,''), "
+                 f"identity_group=COALESCE(d.ise_identity_group,''), "
+                 f"site=COALESCE(d.site,''), "
                  f"hostname=CASE WHEN COALESCE(d.hostname,'')<>'' THEN d.hostname "
                  f"ELSE e.hostname END, "
                  f"device_ip=COALESCE(d.ip, e.device_ip) "
                  f"FROM {dev} d WHERE e.id>=%s AND e.id<%s{tw} "
                  f"AND e.{col} IS NOT NULL AND e.{col}=d.ip")
         by_mac = (f"UPDATE {ev} AS e SET in_ise=true, mapped_ise_mac=d.mac, "
-                  f"device_type=COALESCE(d.device_type,''), site=COALESCE(d.site,''), "
+                  f"device_type=COALESCE(d.device_type,''), "
+                  f"identity_group=COALESCE(d.ise_identity_group,''), "
+                  f"site=COALESCE(d.site,''), "
                   f"hostname=CASE WHEN COALESCE(d.hostname,'')<>'' THEN d.hostname "
                   f"ELSE e.hostname END, "
                   f"device_ip=COALESCE(d.ip, e.device_ip) "
