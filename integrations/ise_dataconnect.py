@@ -490,7 +490,12 @@ class DataConnectClient:
                               profile_col="endpoint_policy"):
         """``{MAC: {'ip':.., 'profile':..}}`` from the endpoints view - backfills
         endpoint IP and the profiling policy (device type) when the discovery
-        source (e.g. RADIUS summary) lacks them. Batched IN (900)."""
+        source (e.g. RADIUS summary) lacks them. Batched IN (900).
+
+        Filters the MAC column DIRECTLY (no UPPER()) so its index is used -
+        UPPER() forces a full-table scan per batch, which crawls on a large
+        endpoints_data. endpoints_data stores MACs upper-case, and we pass
+        upper-case binds, so a direct match is correct and fast."""
         want = [m.upper() for m in macs if m]
         cols = [f"{mac_col} AS mac"]
         if ip_col:
@@ -498,13 +503,15 @@ class DataConnectClient:
         if profile_col:
             cols.append(f"MAX({profile_col}) AS profile")
         out = {}
+        n = (len(want) + 899) // 900
         with self.session():
-            for i in range(0, len(want), 900):
+            for bi, i in enumerate(range(0, len(want), 900), 1):
                 chunk = want[i:i + 900]
+                self._say(f"[dc] endpoint-attrs batch {bi}/{n} ({len(chunk)} MACs)")
                 binds = {f"m{j}": m for j, m in enumerate(chunk)}
                 inlist = ", ".join(f":{k}" for k in binds)
                 sql = (f"SELECT {', '.join(cols)} FROM {view} "
-                       f"WHERE UPPER({mac_col}) IN ({inlist}) GROUP BY {mac_col}")
+                       f"WHERE {mac_col} IN ({inlist}) GROUP BY {mac_col}")
                 try:
                     _, rows = self.query(sql, binds)
                 except DataConnectError:
