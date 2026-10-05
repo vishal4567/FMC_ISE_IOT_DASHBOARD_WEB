@@ -61,6 +61,11 @@ case "${1:-}" in
     need_root
     start authzruleadd "$PY $APP_DIR/manage.py sync_iot_authz_rule --additive"
     ;;
+  profiles)
+    need_root
+    # fast profiler-profile backfill from endpoints_data (no radius scan)
+    start profiles "$PY $APP_DIR/manage.py backfill_profiles ${2:+--$2}"
+    ;;
   restamp)
     need_root
     start restamp "$PY $APP_DIR/manage.py restamp_sites --events"
@@ -101,7 +106,7 @@ case "${1:-}" in
     systemctl list-units "${PREFIX}-*" --all --no-pager
     ;;
   *)
-    echo "usage: sudo bash $0 {sync|fast|fast-add|authzrule|authzrule-add|reenrich|rebaseline|purge [days]|restamp|both|status [name]|logs <name>|stop <name>|list}"
+    echo "usage: sudo bash $0 {sync|fast|fast-add|authzrule|authzrule-add|profiles [all|overwrite]|reenrich|rebaseline|purge [days]|restamp|both|status [name]|logs <name>|stop <name>|list}"
     exit 1
     ;;
 esac
