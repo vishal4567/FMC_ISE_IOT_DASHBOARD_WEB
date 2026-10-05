@@ -95,6 +95,32 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("nothing discovered"))
             return
 
+        # 1b. backfill the PROFILER profile + IP from endpoints_data.
+        # radius_authentications.endpoint_profile is usually blank, so without
+        # this device_type falls back to the identity group. endpoints_data
+        # (endpoint_policy) is the reliable profiler profile.
+        need = [r["mac"] for r in rows
+                if not r.get("endpoint_profile") or not r.get("ip")]
+        if need and dc.get("ENDPOINTS_VIEW"):
+            try:
+                attrs = client.endpoint_attrs_by_mac(
+                    need, view=dc["ENDPOINTS_VIEW"], mac_col=dc["COL_MAC"],
+                    ip_col=dc["COL_IP"], profile_col=dc["COL_PROFILE"])
+                for r in rows:
+                    a = attrs.get(r["mac"])
+                    if not a:
+                        continue
+                    if not r.get("endpoint_profile"):
+                        r["endpoint_profile"] = a.get("profile", "")
+                    if not r.get("ip"):
+                        r["ip"] = a.get("ip", "")
+                have = sum(1 for r in rows if r.get("endpoint_profile"))
+                self.stdout.write(f"profiler-profile backfill: {have}/{len(rows)} "
+                                  f"now have a profile (from {dc['ENDPOINTS_VIEW']})")
+            except Exception as exc:
+                self.stdout.write(self.style.WARNING(
+                    f"endpoints_data backfill skipped: {str(exc)[:120]}"))
+
         # snapshot the current inventory (mac -> ip) BEFORE writing, so we can
         # compute what this run ADDS and REMOVES for the targeted event re-map.
         cur = {m: ip for m, ip in IoTDevice.objects.values_list("mac", "ip")}
