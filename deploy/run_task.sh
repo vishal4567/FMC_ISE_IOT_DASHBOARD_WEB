@@ -72,7 +72,13 @@ case "${1:-}" in
     ;;
   reenrich)
     need_root
-    start reenrich "$PY $APP_DIR/manage.py reenrich_events"
+    start reenrich "$PY $APP_DIR/manage.py reenrich_events ${2:+--batch $2}"
+    ;;
+  fillmap)
+    need_root
+    # chain: fast profiler-profile backfill, then re-map events onto it
+    start fillmap "$PY $APP_DIR/manage.py backfill_profiles && \
+                   $PY $APP_DIR/manage.py reenrich_events ${2:+--batch $2}"
     ;;
   purge)
     need_root
@@ -106,7 +112,7 @@ case "${1:-}" in
     systemctl list-units "${PREFIX}-*" --all --no-pager
     ;;
   *)
-    echo "usage: sudo bash $0 {sync|fast|fast-add|authzrule|authzrule-add|profiles [all|overwrite]|reenrich|rebaseline|purge [days]|restamp|both|status [name]|logs <name>|stop <name>|list}"
+    echo "usage: sudo bash $0 {sync|fast|fast-add|authzrule|authzrule-add|profiles [all|overwrite]|reenrich [batch]|fillmap [batch]|rebaseline|purge [days]|restamp|both|status [name]|logs <name>|stop <name>|list}"
     exit 1
     ;;
 esac
