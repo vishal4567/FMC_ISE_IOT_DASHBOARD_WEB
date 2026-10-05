@@ -1,4 +1,5 @@
 {% extends "dashboard/base.html" %}
+{% load dashboard_extras %}
 {% block title %}Executive View{% endblock %}
 
 {% block content %}
@@ -73,33 +74,33 @@
     <div class="col-6 col-md-4 col-xl-2">
       <a class="kpi cyan" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ overall_q }}">
         <span class="bar"></span><div class="lab">Onboarded devices</div>
-        <div class="val">{{ widgets.total_devices }}</div><div class="sub">ISE inventory</div></a>
+        <div class="val">{{ widgets.total_devices|comma }}</div><div class="sub">ISE inventory</div></a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
       <a class="kpi red" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ overall_q }}">
         <span class="bar"></span><div class="lab">Devices at risk</div>
-        <div class="val">{{ widgets.at_risk }}</div><div class="sub">Medium+ threats</div></a>
+        <div class="val">{{ widgets.at_risk|comma }}</div><div class="sub">Medium+ threats</div></a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
       <a class="kpi amber" href="{% url 'dashboard:dataset' 'ise-quarantined' %}?{{ overall_q }}">
         <span class="bar"></span><div class="lab">Quarantined</div>
-        <div class="val">{{ widgets.quarantined }}</div><div class="sub">In quarantine rule</div></a>
+        <div class="val">{{ widgets.quarantined|comma }}</div><div class="sub">In quarantine rule</div></a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
       <a class="kpi" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}&amp;threats=1">
         <span class="bar"></span><div class="lab">Threat events</div>
-        <div class="val">{{ widgets.threats_window }}</div><div class="sub">{{ filters.range }}</div></a>
+        <div class="val">{{ widgets.threats_window|compact }}</div><div class="sub">{{ filters.range }}</div></a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
       <a class="kpi red" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}&amp;severity=Critical&amp;threats=1">
         <span class="bar"></span><div class="lab">Critical</div>
-        <div class="val">{{ widgets.critical }}</div><div class="sub">Highest severity</div></a>
+        <div class="val">{{ widgets.critical|comma }}</div><div class="sub">Highest severity</div></a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
       <div class="kpi {% if compliance.score >= 90 %}green{% elif compliance.score >= 70 %}amber{% else %}red{% endif %}">
         <span class="bar"></span><div class="lab">Compliance</div>
         <div class="val">{{ compliance.score }}%</div>
-        <div class="sub">{{ compliance.compliant }} / {{ compliance.total }} ok</div></div>
+        <div class="sub">{{ compliance.compliant|comma }} / {{ compliance.total|comma }} ok</div></div>
     </div>
   </div>
 
@@ -135,7 +136,7 @@
              data-url="{% url 'dashboard:atrisk_partial' %}?site={{ filters.site|urlencode }}&range={{ filters.range }}">
           <div class="text-center py-3">
             <button type="button" class="btn btn-outline-primary btn-sm js-load-btn">↓ Load at-risk devices</button>
-            <div class="small text-secondary mt-1">{{ widgets.at_risk }} device(s) at risk · click to view</div>
+            <div class="small text-secondary mt-1">{{ widgets.at_risk|comma }} device(s) at risk · click to view</div>
           </div>
         </div>
       </div>
@@ -146,9 +147,9 @@
         <div style="font-size:2.4rem;font-weight:700;line-height:1;color:var(--acc-green)">{{ correlation.match_rate }}%</div>
         <div class="small text-secondary mb-3">of FMC devices enrolled in ISE</div>
         <div class="d-flex justify-content-around">
-          <div><div class="h5 mb-0" style="color:var(--acc-green)">{{ correlation.matched }}</div><div class="small text-secondary">Matched</div></div>
-          <div><div class="h5 mb-0 text-secondary">{{ correlation.unmatched }}</div><div class="small text-secondary">FMC-only</div></div>
-          <div><div class="h5 mb-0">{{ correlation.total }}</div><div class="small text-secondary">Total</div></div>
+          <div><div class="h5 mb-0" style="color:var(--acc-green)">{{ correlation.matched|comma }}</div><div class="small text-secondary">Matched</div></div>
+          <div><div class="h5 mb-0 text-secondary">{{ correlation.unmatched|comma }}</div><div class="small text-secondary">FMC-only</div></div>
+          <div><div class="h5 mb-0">{{ correlation.total|comma }}</div><div class="small text-secondary">Total</div></div>
         </div>
         <a href="{% url 'dashboard:mapping' %}" class="btn btn-sm btn-primary mt-3">Open mapping →</a>
       </div>
@@ -172,26 +173,26 @@
       <div class="col-6 col-md-3 col-xl">
         <a class="kpi cyan" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ type_q }}">
           <span class="bar"></span><div class="lab">Devices</div>
-          <div class="val">{{ type_metrics.devices }}</div></a></div>
+          <div class="val">{{ type_metrics.devices|comma }}</div></a></div>
       <div class="col-6 col-md-3 col-xl">
         <a class="kpi red" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ type_q }}">
           <span class="bar"></span><div class="lab">At risk</div>
-          <div class="val">{{ type_metrics.at_risk }}</div></a></div>
+          <div class="val">{{ type_metrics.at_risk|comma }}</div></a></div>
       <div class="col-6 col-md-3 col-xl">
         <a class="kpi amber" href="{% url 'dashboard:dataset' 'ise-quarantined' %}?{{ type_q }}">
           <span class="bar"></span><div class="lab">Quarantined</div>
-          <div class="val">{{ type_metrics.quarantined }}</div></a></div>
+          <div class="val">{{ type_metrics.quarantined|comma }}</div></a></div>
       <div class="col-6 col-md-3 col-xl">
         <a class="kpi" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}&amp;threats=1">
           <span class="bar"></span><div class="lab">Threats</div>
-          <div class="val">{{ type_metrics.threats }}</div></a></div>
+          <div class="val">{{ type_metrics.threats|compact }}</div></a></div>
       <div class="col-6 col-md-3 col-xl">
         <a class="kpi red" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}&amp;severity=Critical&amp;threats=1">
           <span class="bar"></span><div class="lab">Critical</div>
-          <div class="val">{{ type_metrics.critical }}</div></a></div>
+          <div class="val">{{ type_metrics.critical|comma }}</div></a></div>
       <div class="col-6 col-md-3 col-xl">
         <div class="kpi violet"><span class="bar"></span><div class="lab">Traffic (MB)</div>
-          <div class="val">{{ type_metrics.traffic_mb }}</div></div></div>
+          <div class="val">{{ type_metrics.traffic_mb|compact }}</div></div></div>
       <div class="col-6 col-md-3 col-xl">
         <div class="kpi"><span class="bar"></span><div class="lab">% Blocked</div>
           <div class="val">{{ type_metrics.pct_blocked }}%</div></div></div>
@@ -222,7 +223,7 @@
            data-url="{% url 'dashboard:atrisk_partial' %}?site={{ filters.site|urlencode }}&range={{ filters.range }}&type={{ selected_type|urlencode }}">
         <div class="text-center py-3">
           <button type="button" class="btn btn-outline-primary btn-sm js-load-btn">↓ Load {{ selected_type }} devices at risk</button>
-          <div class="small text-secondary mt-1">{{ type_metrics.at_risk }} device(s) at risk · click to view</div>
+          <div class="small text-secondary mt-1">{{ type_metrics.at_risk|comma }} device(s) at risk · click to view</div>
         </div>
       </div>
     </div>
@@ -244,11 +245,11 @@
           {% for t in leaderboard %}
           <tr>
             <td class="fw-semibold">{{ t.device_type }}</td>
-            <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ t.q }}">{{ t.devices }}</a></td>
-            <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ t.q }}">{{ t.at_risk }}</a></td>
-            <td class="text-end">{{ t.quarantined }}</td>
-            <td class="text-end fw-semibold" style="color:var(--acc-red)"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;threats=1">{{ t.threats }}</a></td>
-            <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;severity=Critical&amp;threats=1">{{ t.critical }}</a></td>
+            <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ t.q }}">{{ t.devices|comma }}</a></td>
+            <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ t.q }}">{{ t.at_risk|comma }}</a></td>
+            <td class="text-end">{{ t.quarantined|comma }}</td>
+            <td class="text-end fw-semibold" style="color:var(--acc-red)"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;threats=1">{{ t.threats|comma }}</a></td>
+            <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;severity=Critical&amp;threats=1">{{ t.critical|comma }}</a></td>
             <td class="text-end fw-semibold {% if t.compliance >= 90 %}text-success{% elif t.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ t.compliance }}%</td>
           </tr>
           {% endfor %}

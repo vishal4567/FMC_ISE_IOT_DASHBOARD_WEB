@@ -49,7 +49,7 @@
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ overall_q }}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W1 · Total IoT Devices</div>
-        <div class="display-5 fw-bold text-primary">{{ widgets.total_devices }}</div>
+        <div class="display-5 fw-bold text-primary">{{ widgets.total_devices|comma }}</div>
         <div class="small text-muted">Onboarded in ISE</div>
       </div></div>
     </a>
@@ -58,7 +58,7 @@
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ overall_q }}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W2 · Devices at Risk</div>
-        <div class="display-5 fw-bold text-danger">{{ widgets.at_risk }}</div>
+        <div class="display-5 fw-bold text-danger">{{ widgets.at_risk|comma }}</div>
         <div class="small text-muted">With threat events · {{ filters.range }}</div>
       </div></div>
     </a>
@@ -67,7 +67,7 @@
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-quarantined' %}?{{ overall_q }}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W3 · Quarantined / Blocked</div>
-        <div class="display-5 fw-bold text-warning">{{ widgets.quarantined }}</div>
+        <div class="display-5 fw-bold text-warning">{{ widgets.quarantined|comma }}</div>
         <div class="small text-muted">In IoT quarantine rule</div>
       </div></div>
     </a>
@@ -76,7 +76,7 @@
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W4 · Threat Events ({{ filters.range }})</div>
-        <div class="display-5 fw-bold">{{ widgets.threats_window }}</div>
+        <div class="display-5 fw-bold">{{ widgets.threats_window|compact }}</div>
         <div class="small text-muted">Traffic &amp; threat trend ↓</div>
       </div></div>
     </a>
@@ -85,7 +85,7 @@
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}&severity=Critical">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W5 · Critical Attacks</div>
-        <div class="display-5 fw-bold text-danger">{{ widgets.critical }}</div>
+        <div class="display-5 fw-bold text-danger">{{ widgets.critical|comma }}</div>
         <div class="small text-muted">Highest severity · {{ filters.range }}</div>
       </div></div>
     </a>
@@ -95,7 +95,7 @@
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">Compliance Score</div>
         <div class="display-5 fw-bold {% if compliance.score >= 90 %}text-success{% elif compliance.score >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ compliance.score }}%</div>
-        <div class="small text-muted">{{ compliance.compliant }} / {{ compliance.total }} compliant · {{ compliance.quarantined }} quarantined</div>
+        <div class="small text-muted">{{ compliance.compliant|comma }} / {{ compliance.total|comma }} compliant · {{ compliance.quarantined|comma }} quarantined</div>
       </div></div>
     </a>
   </div>
@@ -139,11 +139,11 @@
         {% for t in leaderboard %}
         <tr class="{% if selected_type == t.device_type %}table-primary{% endif %}">
           <td class="fw-semibold">{{ t.device_type }}</td>
-          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ t.q }}" title="View devices">{{ t.devices }}</a></td>
-          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}" title="View events">{{ t.events }}</a></td>
-          <td class="text-end fw-bold text-danger"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;threats=1" title="View threat events">{{ t.threats }}</a></td>
-          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;severity=Critical&amp;threats=1" title="View critical events">{{ t.critical }}</a></td>
-          <td class="text-end">{{ t.traffic_mb }}</td>
+          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ t.q }}" title="View devices">{{ t.devices|comma }}</a></td>
+          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}" title="View events">{{ t.events|compact }}</a></td>
+          <td class="text-end fw-bold text-danger"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;threats=1" title="View threat events">{{ t.threats|comma }}</a></td>
+          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;severity=Critical&amp;threats=1" title="View critical events">{{ t.critical|comma }}</a></td>
+          <td class="text-end">{{ t.traffic_mb|compact }}</td>
           <td class="text-end">{{ t.pct_blocked }}%</td>
           <td class="text-end fw-semibold {% if t.compliance >= 90 %}text-success{% elif t.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ t.q }}" title="View at-risk devices">{{ t.compliance }}%</a></td>
         </tr>
@@ -165,7 +165,7 @@
            data-url="{% url 'dashboard:atrisk_partial' %}?site={{ filters.site|urlencode }}&range={{ filters.range }}">
         <div class="text-center py-3">
           <button type="button" class="btn btn-outline-primary btn-sm js-load-btn">↓ Load at-risk devices</button>
-          <div class="small text-muted mt-1">{{ widgets.at_risk }} device(s) at risk · click to view</div>
+          <div class="small text-muted mt-1">{{ widgets.at_risk|comma }} device(s) at risk · click to view</div>
         </div>
       </div>
     </div></div>
@@ -196,10 +196,10 @@
       <div class="card widget shadow-sm h-100 {% if selected_type == t.device_type %}border-primary border-3{% endif %}">
         <div class="card-body p-2 text-center">
           <div class="small fw-semibold text-truncate">{{ t.device_type }}</div>
-          <div class="h4 mb-0 text-danger">{{ t.threats }}</div>
+          <div class="h4 mb-0 text-danger">{{ t.threats|comma }}</div>
           <div class="small text-muted">threats</div>
-          <div class="small mt-1">{{ t.devices }} devices · {{ t.traffic_mb }} MB</div>
-          <div class="small text-muted">{{ t.critical }} critical · {{ t.pct_blocked }}% blocked</div>
+          <div class="small mt-1">{{ t.devices }} devices · {{ t.traffic_mb|compact }} MB</div>
+          <div class="small text-muted">{{ t.critical|comma }} critical · {{ t.pct_blocked }}% blocked</div>
           <div class="small fw-semibold {% if t.compliance >= 90 %}text-success{% elif t.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ t.compliance }}% compliant</div>
         </div>
       </div>
@@ -226,22 +226,22 @@
   <div class="row g-3 mb-3">
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ type_q }}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Devices</div>
-      <div class="h2 mb-0 text-primary">{{ type_metrics.devices }}</div></div></div></a></div>
+      <div class="h2 mb-0 text-primary">{{ type_metrics.devices|comma }}</div></div></div></a></div>
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ type_q }}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">At Risk</div>
-      <div class="h2 mb-0 text-danger">{{ type_metrics.at_risk }}</div></div></div></a></div>
+      <div class="h2 mb-0 text-danger">{{ type_metrics.at_risk|comma }}</div></div></div></a></div>
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-quarantined' %}?{{ type_q }}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Quarantined</div>
-      <div class="h2 mb-0 text-warning">{{ type_metrics.quarantined }}</div></div></div></a></div>
+      <div class="h2 mb-0 text-warning">{{ type_metrics.quarantined|comma }}</div></div></div></a></div>
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Threat Events</div>
-      <div class="h2 mb-0">{{ type_metrics.threats }}</div></div></div></a></div>
+      <div class="h2 mb-0">{{ type_metrics.threats|compact }}</div></div></div></a></div>
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}&severity=Critical"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Critical</div>
-      <div class="h2 mb-0 text-danger">{{ type_metrics.critical }}</div></div></div></a></div>
+      <div class="h2 mb-0 text-danger">{{ type_metrics.critical|comma }}</div></div></div></a></div>
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Traffic (MB)</div>
-      <div class="h2 mb-0">{{ type_metrics.traffic_mb }}</div></div></div></a></div>
+      <div class="h2 mb-0">{{ type_metrics.traffic_mb|compact }}</div></div></div></a></div>
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">% Blocked</div>
       <div class="h2 mb-0">{{ type_metrics.pct_blocked }}%</div></div></div></a></div>
@@ -278,7 +278,7 @@
          data-url="{% url 'dashboard:atrisk_partial' %}?site={{ filters.site|urlencode }}&range={{ filters.range }}&type={{ selected_type|urlencode }}">
       <div class="text-center py-3">
         <button type="button" class="btn btn-outline-primary btn-sm js-load-btn">↓ Load {{ selected_type }} devices at risk</button>
-        <div class="small text-muted mt-1">{{ type_metrics.at_risk }} device(s) at risk · click to view</div>
+        <div class="small text-muted mt-1">{{ type_metrics.at_risk|comma }} device(s) at risk · click to view</div>
       </div>
     </div>
   </div></div>
