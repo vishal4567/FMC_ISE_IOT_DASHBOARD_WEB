@@ -81,9 +81,15 @@ class Command(BaseCommand):
 
         # precedence: reset -> dest_ip -> source_ip -> MAC (later overrides).
         # UPDATE ... FROM joins each event to its IoTDevice by IP / MAC.
+        # only reset rows that aren't ALREADY clean FMC-only - skipping the
+        # rewrite on already-clean rows avoids huge write amplification (and the
+        # autovacuum it triggers), especially on re-runs. Matched rows are then
+        # (re)written by the by_ip/by_mac statements below.
         reset = (f"UPDATE {ev} SET in_ise=false, mapped_ise_mac='', "
                  f"device_type='', identity_group='', site='', device_ip=source_ip "
-                 f"WHERE id>=%s AND id<%s{tw}")
+                 f"WHERE id>=%s AND id<%s{tw} AND (in_ise OR device_type<>'' "
+                 f"OR identity_group<>'' OR site<>'' OR mapped_ise_mac<>'' "
+                 f"OR device_ip IS DISTINCT FROM source_ip)")
         by_ip = (lambda col:
                  f"UPDATE {ev} AS e SET in_ise=true, mapped_ise_mac=d.mac, "
                  f"device_mac=CASE WHEN e.device_mac='' OR upper(e.device_mac)='NONE' "
@@ -127,8 +133,9 @@ class Command(BaseCommand):
         if since:
             in_ise = in_ise.filter(ts__gte=since)
         self.stdout.write(self.style.SUCCESS(
-            f"done: re-mapped {processed:,} events in {round(time.time()-t0,1)}s; "
-            f"{in_ise.count():,} now matched to the baseline"))
+            f"done: re-map over ids {lo:,}..{hi:,} in {round(time.time()-t0,1)}s "
+            f"({processed:,} rows rewritten); "
+            f"{in_ise.count():,} events now matched to the baseline"))
 
     # ------------------------------------------------------------------ #
     def _progress(self, pct, rows, t0):
