@@ -515,9 +515,9 @@ DATASETS: dict[str, Dataset] = {
             source="FMC",
             fetch=_threat_events,
             derived=True,
-            widget="Events feed (intrusion/connection/malware/file/SI)",
-            description="FMC event feed (intrusion / connection / malware / "
-            "file / security-intelligence).",
+            widget="Events feed (intrusion/malware/file/SI)",
+            description="FMC security event feed (intrusion / malware / file / "
+            "security-intelligence).",
         ),
         Dataset(
             key="sim-devices-at-risk",

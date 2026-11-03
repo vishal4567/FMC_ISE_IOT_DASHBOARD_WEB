@@ -2,6 +2,27 @@
 {% block title %}{{ dataset.label }}{% endblock %}
 
 {% block content %}
+<style>
+  .dataset-card .card-header {
+    display:flex; align-items:center; justify-content:space-between;
+    flex-wrap:wrap; gap:.5rem;
+  }
+  #data-table.dataset-table { border-collapse:separate; border-spacing:0; }
+  .dataset-table thead th {
+    position:sticky; top:0; z-index:2;
+    background:var(--bs-tertiary-bg, #f1f3f5);
+    border-bottom:2px solid var(--bs-border-color);
+    text-transform:uppercase; font-size:.7rem; letter-spacing:.04em;
+    color:var(--bs-secondary-color); white-space:nowrap; padding:.6rem .75rem;
+  }
+  .dataset-table tbody td { font-size:.86rem; padding:.55rem .75rem; vertical-align:middle; }
+  .dataset-table tbody tr:hover > td { background:var(--bs-primary-bg-subtle); }
+  .dataset-table tbody tr:not(:last-child) > td { border-bottom:1px solid var(--bs-border-color); }
+  .cell-badge { font-weight:600; letter-spacing:.02em; }
+  .dataTables_wrapper .dataTables_filter input { border-radius:20px; }
+  .dataTables_wrapper .row:first-child { margin-bottom:.75rem; }
+</style>
+
 <nav aria-label="breadcrumb">
   <ol class="breadcrumb">
     <li class="breadcrumb-item"><a href="{% url 'dashboard:index' %}">Overview</a></li>
@@ -9,17 +30,13 @@
   </ol>
 </nav>
 
-<div class="d-flex justify-content-between align-items-start flex-wrap mb-3">
-  <div>
-    <h3 class="mb-1">
-      {{ dataset.label }}
-      <span class="badge {% if dataset.source == 'ISE' %}bg-info{% elif dataset.source == 'MAP' %}bg-primary{% else %}bg-warning text-dark{% endif %} align-middle">
-        {{ dataset.source }}
-      </span>
-    </h3>
-    <div class="text-muted">{{ dataset.description }}</div>
-    <div class="small text-muted">Maps to: {{ dataset.widget }}</div>
-  </div>
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+  <h3 class="mb-0 d-flex align-items-center gap-2">
+    {{ dataset.label }}
+    <span class="badge rounded-pill {% if dataset.source == 'ISE' %}bg-info{% elif dataset.source == 'MAP' %}bg-primary{% else %}bg-warning text-dark{% endif %}">
+      {{ dataset.source }}
+    </span>
+  </h3>
   <div class="text-end">
     <a id="csv-link" href="{% url 'dashboard:dataset_csv' dataset.key %}" class="btn btn-sm btn-success">⬇ Export CSV</a>
     <button id="reload" class="btn btn-sm btn-outline-primary">↻ Reload</button>
@@ -28,17 +45,20 @@
 </div>
 
 <!-- The page paints immediately; rows arrive from the JSON API below. -->
-<div id="status" class="alert alert-secondary">
+<div id="status" class="alert alert-secondary d-flex align-items-center">
   <span class="spinner-border spinner-border-sm me-2" role="status"></span>
   Loading data…
 </div>
 
-<div id="table-wrap" class="table-responsive d-none">
-  <div class="mb-2 text-muted small"><span id="rowcount">0</span> record(s)</div>
-  <table id="data-table" class="table table-sm table-striped table-hover align-middle w-100">
-    <thead class="table-dark"><tr id="thead-row"></tr></thead>
-    <tbody id="tbody"></tbody>
-  </table>
+<div id="table-wrap" class="card shadow-sm dataset-card d-none">
+  <div class="card-body">
+    <div class="table-responsive">
+      <table id="data-table" class="table table-hover align-middle w-100 mb-0 dataset-table">
+        <thead><tr id="thead-row"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
 </div>
 {% endblock %}
 
@@ -60,6 +80,41 @@
       ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   }
 
+  // Pretty column header: device_mac -> "Device Mac"
+  function pretty(k) {
+    return esc(String(k).replace(/_/g, " ").replace(/\b\w/g, m => m.toUpperCase()));
+  }
+
+  // Richer cell rendering for well-known columns (badges), plain esc otherwise.
+  const SEV = { critical:"danger", high:"warning", medium:"info",
+                low:"secondary", informational:"secondary" };
+  function cellRender(col, v) {
+    const s = esc(v);
+    if (v === null || v === undefined || v === "") return "";
+    const c = String(col).toLowerCase();
+    if (c === "severity") {
+      const cls = SEV[String(v).toLowerCase()] || "secondary";
+      return `<span class="badge text-bg-${cls} cell-badge">${s}</span>`;
+    }
+    if (c === "action") {
+      const blocked = /block/i.test(String(v));
+      return `<span class="badge ${blocked ? "text-bg-danger" : "text-bg-success"} cell-badge">${s}</span>`;
+    }
+    if (c === "quarantined") {
+      const yes = v === true || String(v).toLowerCase() === "true" || String(v).toLowerCase() === "yes";
+      return yes ? `<span class="badge text-bg-warning cell-badge">Yes</span>`
+                 : `<span class="text-muted">No</span>`;
+    }
+    if (c === "event_type" || c === "device_type") {
+      return `<span class="badge rounded-pill text-bg-light border">${s}</span>`;
+    }
+    if (c === "device_mac" || c === "mac" || c === "device_ip" || c === "ip"
+        || c === "source_ip" || c === "dest_ip") {
+      return `<span class="font-monospace small">${s}</span>`;
+    }
+    return s;
+  }
+
   function initTable() {
     const $status = $("#status"), $wrap = $("#table-wrap");
     // preflight: discover columns (1 row) before initialising DataTables
@@ -72,7 +127,7 @@
         }
         const cols = (meta.columns || []);
         if (!cols.length && !meta.recordsTotal) { $status.text("No records."); return; }
-        $("#thead-row").html(cols.map(c => `<th>${esc(c)}</th>`).join(""));
+        $("#thead-row").html(cols.map(c => `<th>${pretty(c)}</th>`).join(""));
         $status.addClass("d-none");
         $wrap.removeClass("d-none");
         dt = $("#data-table").DataTable({
@@ -94,9 +149,13 @@
               $("#table-wrap").addClass("d-none");
             }
           },
-          columns: cols.map(c => ({ data: c, title: c, defaultContent: "",
-            render: function (v) { return esc(v); } })),
-          language: { search: "Search:", processing: "Loading…" }
+          columns: cols.map(c => ({ data: c, title: pretty(c), defaultContent: "",
+            render: function (v) { return cellRender(c, v); } })),
+          language: {
+            search: "", searchPlaceholder: "Search…", processing: "Loading…",
+            info: "_START_–_END_ of _TOTAL_", infoEmpty: "0 records",
+            lengthMenu: "Show _MENU_"
+          }
         });
         dt.on('error.dt', function (e, settings, techNote, message) {
           $("#status").removeClass("d-none alert-secondary").addClass("alert-danger")
