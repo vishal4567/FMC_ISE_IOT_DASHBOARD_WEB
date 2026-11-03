@@ -92,8 +92,8 @@
         <span class="ico">🔗</span><span class="label">ISE ↔ FMC Mapping</span></a>
       <a class="nav-link {% if url == 'reports' %}active{% endif %}" href="{% url 'dashboard:reports' %}" title="Reports">
         <span class="ico">📄</span><span class="label">Reports</span></a>
-      <a class="nav-link {% if url == 'readiness' %}active{% endif %}" href="{% url 'dashboard:readiness' %}" title="Policy Readiness">
-        <span class="ico">🛡️</span><span class="label">Policy Readiness</span></a>
+      <a class="nav-link {% if url == 'readiness' %}active{% endif %}" href="{% url 'dashboard:readiness' %}" title="Capability Readiness">
+        <span class="ico">🛡️</span><span class="label">Capability Readiness</span></a>
 
       {% if user.is_staff %}
       <div class="sect">Admin</div>

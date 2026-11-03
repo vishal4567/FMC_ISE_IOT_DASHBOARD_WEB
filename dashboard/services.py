@@ -758,174 +758,186 @@ def dashboard_cards(*, use_cache: bool = True) -> list:
 
 
 # --------------------------------------------------------------------------- #
-# Policy readiness  (use case -> configured controls -> status)
+# Capability readiness  (use case -> live signal -> status)
 #
-# Most requirement use cases are event-driven and their live data needs an FMC
-# event stream (eStreamer / SAL) that the config REST API does not provide.
-# This view answers the prerequisite question instead: "are the CONTROLS that
-# would generate/enforce each use case actually configured?" - built entirely
-# from config objects we can read today. It makes the gap explicit rather than
-# hiding it, and gives an at-a-glance posture map.
+# Judged from the data the platform actually has NOW: the eStreamer event feed
+# (SecurityEvent), the ISE IoT inventory, correlation and quarantine - not FMC
+# REST config counts (which need FMC credentials this deployment may lack). So
+# the map reflects what is really operating today, per use case.
 #
 # Status keys:
-#   available      - data is fully available now over REST (green)
-#   controls-ready - controls configured; live events still need eStreamer/SAL (amber)
-#   action-needed  - needs write access and/or an event stream to operate (blue)
-#   missing        - no controls configured for this use case (red)
+#   operational   - live data is flowing for this capability (green)
+#   ready         - capability is wired but no events in the window yet (amber)
+#   action-needed - needs a write-capable ISE ANC account to act (blue)
+#   disabled      - depends on connection logging, which is turned off (grey)
+#   none          - no data yet (red)
 # --------------------------------------------------------------------------- #
 STATUS_LABELS = {
-    "available": "Available now",
-    "controls-ready": "Controls ready Â· events pending",
-    "action-needed": "Needs write access / event stream",
-    "missing": "Not configured",
+    "operational": "Operational",
+    "ready": "Ready - no recent events",
+    "action-needed": "Needs write access (ANC)",
+    "disabled": "Disabled - connection logging off",
+    "none": "No data yet",
 }
 
 
 def policy_readiness(*, use_cache: bool = True) -> list:
+    from datetime import timedelta
+
+    from django.db.models import Count
+    from django.utils import timezone
+
+    from dashboard import analytics
+    from dashboard.models import IoTDevice, SecurityEvent
+
     def count(key):
         return len(fetch_dataset(key, use_cache=use_cache)["rows"])
 
-    intrusion = count("fmc-intrusion-policies")
-    files = count("fmc-file-policies")
-    prefilter = count("fmc-prefilter-policies")
-    zones = count("fmc-security-zones")
-    rules = count("fmc-access-rules")
-    unauthorized = count("ise-unauthorized")
-    unauth_groups = count("ise-endpoint-groups")  # context only
+    # LIVE signals: judge each capability from the data we actually have now -
+    # the eStreamer event feed + ISE inventory + correlation - not FMC REST
+    # config counts (which need FMC credentials this deployment may not have).
+    win = analytics.EVENT_WINDOW_DAYS
+    cutoff = timezone.now() - timedelta(days=win)
+    by_type = {r["event_type"]: r["n"] for r in
+               SecurityEvent.objects.filter(ts__gte=cutoff)
+               .values("event_type").annotate(n=Count("id"))}
+    intrusion = by_type.get("Intrusion", 0)
+    malware = by_type.get("Malware", 0)
+    files = by_type.get("File", 0)
+    si = by_type.get("Security Intelligence", 0)
 
-    def controls_status(n, *, live_via_rest=False, action=False):
-        if n <= 0:
-            return "missing"
-        if live_via_rest:
-            return "available"
-        if action:
-            return "action-needed"
-        return "controls-ready"
+    devices = IoTDevice.objects.count()
+    quarantined = analytics.quarantined_count()
+    at_risk = count("sim-devices-at-risk")
+    unauthorized = count("ise-unauthorized")
+    insecure = count("sim-insecure")
+    outside = count("sim-outside-zone")
+    match_rate = analytics.correlation_summary().get("match_rate", 0)
+    compliant = max(devices - at_risk - quarantined, 0)
+
+    def live(n):
+        # operational when we actually see data in the window; otherwise the
+        # capability is wired but quiet.
+        return "operational" if n > 0 else "ready"
 
     rows = [
+        {
+            "use_case": "Asset Inventory & Onboarding",
+            "category": "Asset Inventory",
+            "source": "ISE",
+            "controls": "ISE-onboarded IoT inventory",
+            "count": devices,
+            "status": "operational" if devices else "none",
+            "note": f"{devices:,} IoT devices onboarded in ISE and tracked live.",
+            "links": [("ise-endpoints", "View devices")],
+        },
         {
             "use_case": "Unauthorised Device Detection",
             "category": "Asset Inventory",
             "source": "ISE",
             "controls": "Blocked List / Unknown identity groups",
             "count": unauthorized,
-            "status": controls_status(unauthorized, live_via_rest=True)
-            if unauthorized
-            else "controls-ready",
-            "note": "Endpoints ISE blocked or could not identify. Live "
-            "failed-auth logs additionally require the MnT API.",
+            "status": live(unauthorized),
+            "note": "Endpoints ISE blocked or could not identify (live from ISE).",
             "links": [("ise-unauthorized", "View endpoints")],
         },
         {
             "use_case": "IoT Device Risk Profile",
             "category": "Asset Inventory",
-            "source": "FMC",
-            "controls": "Intrusion + File/Malware policies",
-            "count": intrusion + files,
-            "status": controls_status(intrusion + files),
-            "note": "IOC / risky-app events come from the FMC event stream "
-            "(eStreamer / SAL).",
-            "links": [
-                ("fmc-intrusion-policies", "Intrusion"),
-                ("fmc-file-policies", "File/Malware"),
-            ],
+            "source": "FMC + ISE",
+            "controls": "Devices with Medium+ events (last %dd)" % win,
+            "count": at_risk,
+            "status": live(at_risk),
+            "note": "Devices at risk, ranked from the live event feed and "
+            "correlated back to the ISE identity.",
+            "links": [("sim-devices-at-risk", "View at-risk devices")],
         },
         {
             "use_case": "Real-Time Threat Detection & Incident Response",
             "category": "Threat Detection & Response",
             "source": "FMC",
-            "controls": "Intrusion policies",
-            "count": intrusion,
-            "status": controls_status(intrusion),
-            "note": "Intrusion & malware events require eStreamer / SAL.",
-            "links": [("fmc-intrusion-policies", "Intrusion policies")],
-        },
-        {
-            "use_case": "Automated Threat Mitigation",
-            "category": "Threat Detection & Response",
-            "source": "FMC",
-            "controls": "Intrusion + File/Malware policies",
-            "count": intrusion + files,
-            "status": controls_status(intrusion + files),
-            "note": "Blocked-by-IPS/SI/Malware events require the event stream.",
-            "links": [
-                ("fmc-intrusion-policies", "Intrusion"),
-                ("fmc-file-policies", "File/Malware"),
-            ],
-        },
-        {
-            "use_case": "Automated Device Isolation",
-            "category": "Threat Detection & Response",
-            "source": "FMC + ISE",
-            "controls": "ISE ANC quarantine (write) + FMC correlation events",
-            "count": 0,
-            "status": "action-needed",
-            "note": "Needs a write-capable ISE account (ANC/CoA) and FMC "
-            "correlation events - not possible with a read-only sandbox account.",
-            "links": [],
+            "controls": "Intrusion + Security-Intelligence events (last %dd)" % win,
+            "count": intrusion + si,
+            "status": live(intrusion + si),
+            "note": "Live intrusion / SI events arriving on the eStreamer feed.",
+            "links": [("sim-events", "View events")],
         },
         {
             "use_case": "Advanced Threat Analysis",
             "category": "Threat Detection & Response",
             "source": "FMC",
-            "controls": "File/Malware policies (retrospective + EVE)",
-            "count": files,
-            "status": controls_status(files),
-            "note": "Retrospective file & EVE events require the event stream.",
-            "links": [("fmc-file-policies", "File/Malware policies")],
+            "controls": "File + Malware events (last %dd)" % win,
+            "count": malware + files,
+            "status": live(malware + files),
+            "note": "Malware / file inspection events from the feed "
+            "(retrospective + EVE).",
+            "links": [("sim-events", "View events")],
+        },
+        {
+            "use_case": "Automated Threat Mitigation",
+            "category": "Threat Detection & Response",
+            "source": "FMC + ISE",
+            "controls": "Blocked / quarantined devices",
+            "count": quarantined,
+            "status": "action-needed",
+            "note": "Blocked events are detected live; AUTOMATED mitigation needs "
+            "a write-capable ISE ANC/CoA account.",
+            "links": [],
+        },
+        {
+            "use_case": "Automated Device Isolation",
+            "category": "Threat Detection & Response",
+            "source": "ISE",
+            "controls": "ISE ANC quarantine (write)",
+            "count": quarantined,
+            "status": "action-needed",
+            "note": "Quarantined devices are tracked read-only; automated "
+            "isolation needs an ANC write account.",
+            "links": [("ise-quarantined", "View quarantined")],
         },
         {
             "use_case": "Compliance Tracking for IoT Devices",
             "category": "Compliance Management",
-            "source": "FMC",
-            "controls": "Security zones + Access rules + Prefilter",
-            "count": zones + rules + prefilter,
-            "status": controls_status(zones + rules + prefilter),
-            "note": "Zone-bypass compliance is evaluated against connection "
-            "events from the event stream.",
-            "links": [
-                ("fmc-security-zones", "Zones"),
-                ("fmc-access-rules", "Access rules"),
-                ("fmc-prefilter-policies", "Prefilter"),
-            ],
+            "source": "FMC + ISE",
+            "controls": "Compliant devices (not at-risk / quarantined)",
+            "count": compliant,
+            "status": "operational" if devices else "none",
+            "note": "Compliance computed live from at-risk and quarantined "
+            "devices; ISE↔FMC correlation at %d%%." % match_rate,
+            "links": [("sim-devices-at-risk", "View at-risk")],
         },
         {
             "use_case": "Traffic / Flow Monitoring",
             "category": "Traffic Visibility",
             "source": "FMC",
-            "controls": "Access rules with logging",
-            "count": rules,
-            "status": controls_status(rules),
-            "note": "Top-talker / top-app data comes from connection events "
-            "(eStreamer / SAL).",
-            "links": [("fmc-access-rules", "Access rules")],
+            "controls": "Connection / flow events",
+            "count": 0,
+            "status": "disabled",
+            "note": "Connection (flow) logging is disabled on this deployment, "
+            "so top-talker / bandwidth data is not collected.",
+            "links": [],
         },
         {
             "use_case": "Insecure Data Transfer",
             "category": "Traffic Visibility",
             "source": "FMC",
-            "controls": "Access rules + File policies",
-            "count": rules + files,
-            "status": controls_status(rules + files),
-            "note": "Insecure-protocol (ftp/http) correlation needs connection "
-            "events.",
-            "links": [
-                ("fmc-access-rules", "Access rules"),
-                ("fmc-file-policies", "File policies"),
-            ],
+            "controls": "Clear-text protocol events",
+            "count": insecure,
+            "status": "operational" if insecure else "disabled",
+            "note": "Telnet/FTP/HTTP/SNMP detection relied on connection events, "
+            "which are currently disabled.",
+            "links": [("sim-insecure", "View events")],
         },
         {
             "use_case": "Assets Talking Outside Allowed Zone",
             "category": "Traffic Visibility",
             "source": "FMC",
-            "controls": "Security zones + Access rules (block)",
-            "count": zones + rules,
-            "status": controls_status(zones + rules),
-            "note": "Blocked cross-zone events come from the event stream.",
-            "links": [
-                ("fmc-security-zones", "Zones"),
-                ("fmc-access-rules", "Access rules"),
-            ],
+            "controls": "Blocked cross-zone events",
+            "count": outside,
+            "status": "operational" if outside else "disabled",
+            "note": "Cross-zone / Outside-DMZ detection relied on connection "
+            "events, which are currently disabled.",
+            "links": [("sim-outside-zone", "View events")],
         },
     ]
     for r in rows:
