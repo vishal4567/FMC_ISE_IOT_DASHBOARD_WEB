@@ -730,10 +730,23 @@ def connection_status_live(*, use_cache: bool = True) -> dict:
     return status
 
 
+# Dataset keys hidden from the Reports page. They stay defined (routing, CSV
+# export, and the policy-readiness view still count the FMC config objects) but
+# are not shown as report cards.
+HIDDEN_REPORT_KEYS = {
+    "ise-sessions",                                        # ISE Active Sessions (MnT)
+    "fmc-devices", "fmc-access-policies", "fmc-access-rules",
+    "fmc-intrusion-policies", "fmc-file-policies", "fmc-prefilter-policies",
+    "fmc-security-zones", "fmc-network-objects", "fmc-audit",  # FMC REST reports
+}
+
+
 def dashboard_cards(*, use_cache: bool = True) -> list:
     """One card per dataset with a row count (or error) for the landing page."""
     cards = []
     for ds in DATASETS.values():
+        if ds.key in HIDDEN_REPORT_KEYS:
+            continue
         payload = fetch_dataset(ds.key, use_cache=use_cache)
         cards.append(
             {
