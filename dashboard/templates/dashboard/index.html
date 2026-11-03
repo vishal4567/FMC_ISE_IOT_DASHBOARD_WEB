@@ -48,7 +48,7 @@
   <div class="col-6 col-lg">
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ overall_q }}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
-        <div class="text-muted small text-uppercase">W1 · Total IoT Devices</div>
+        <div class="text-muted small text-uppercase">Total IoT Devices</div>
         <div class="fw-bold fs-2 text-primary">{{ widgets.total_devices|comma }}</div>
         <div class="small text-muted">Onboarded in ISE</div>
       </div></div>
@@ -57,7 +57,7 @@
   <div class="col-6 col-lg">
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ overall_q }}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
-        <div class="text-muted small text-uppercase">W2 · Devices at Risk</div>
+        <div class="text-muted small text-uppercase">Devices at Risk</div>
         <div class="fw-bold fs-2 text-danger">{{ widgets.at_risk|comma }}</div>
         <div class="small text-muted">With events · {{ filters.range }}</div>
       </div></div>
@@ -66,7 +66,7 @@
   <div class="col-6 col-lg">
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'ise-quarantined' %}?{{ overall_q }}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
-        <div class="text-muted small text-uppercase">W3 · Quarantined / Blocked</div>
+        <div class="text-muted small text-uppercase">Quarantined / Blocked</div>
         <div class="fw-bold fs-2 text-warning">{{ widgets.quarantined|comma }}</div>
         <div class="small text-muted">In IoT quarantine rule</div>
       </div></div>
@@ -75,7 +75,7 @@
   <div class="col-6 col-lg">
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
-        <div class="text-muted small text-uppercase">W4 · Events ({{ filters.range }})</div>
+        <div class="text-muted small text-uppercase">Events ({{ filters.range }})</div>
         <div class="fw-bold fs-2">{{ widgets.threats_window|compact }}</div>
         <div class="small text-muted">Event trend ↓</div>
       </div></div>
@@ -84,7 +84,7 @@
   <div class="col-6 col-lg">
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}&severity=Critical">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
-        <div class="text-muted small text-uppercase">W5 · Critical Events</div>
+        <div class="text-muted small text-uppercase">Critical Events</div>
         <div class="fw-bold fs-2 text-danger">{{ widgets.critical|comma }}</div>
         <div class="small text-muted">Highest severity · {{ filters.range }}</div>
       </div></div>
@@ -105,7 +105,7 @@
 <div class="row g-3 mb-4">
   <div class="col-lg-4">
     <div class="card shadow-sm h-100"><div class="card-body">
-      <h6 class="card-title">Event Severity <span class="text-muted small">(Widget 5 · {{ filters.range }})</span>
+      <h6 class="card-title">Event Severity <span class="text-muted small">({{ filters.range }})</span>
         <div class="btn-group btn-group-sm float-end" role="group">
           <button type="button" class="btn btn-outline-secondary active" onclick="sevToggle('sevAll','doughnut',this)">Pie</button>
           <button type="button" class="btn btn-outline-secondary" onclick="sevToggle('sevAll','bar',this)">Bar</button>
@@ -117,7 +117,7 @@
   <div class="col-lg-8">
     <div class="card shadow-sm h-100"><div class="card-body">
       <h6 class="card-title">Event Trend — {{ filters.range }}
-        <span class="text-muted small">(Widget 4 · per {{ filters.granularity }})</span></h6>
+        <span class="text-muted small">(per {{ filters.granularity }})</span></h6>
       <canvas id="trendAll" height="90"></canvas>
     </div></div>
   </div>
@@ -157,7 +157,7 @@
   <div class="col-lg-8">
     <div class="card shadow-sm h-100"><div class="card-body">
       <div class="d-flex justify-content-between align-items-center mb-2">
-        <h6 class="card-title mb-0">Top IoT Devices at Risk <span class="text-muted small">(Widget 2 · all types)</span></h6>
+        <h6 class="card-title mb-0">Top IoT Devices at Risk <span class="text-muted small">(all types)</span></h6>
         <a href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ overall_q }}" class="btn btn-sm btn-outline-secondary">Full report</a>
       </div>
       <div class="js-lazy-table"
