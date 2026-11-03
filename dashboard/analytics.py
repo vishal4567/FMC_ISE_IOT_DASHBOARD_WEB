@@ -26,6 +26,11 @@ THREAT_SEVERITIES = ["Critical", "High", "Medium"]
 # from every tile/chart/table/drill-down (via _base_qs) AND dropped at ingest so
 # they never reach the DB. Only Critical/High/Medium are kept anywhere.
 DROP_SEVERITIES = ["Low", "Informational"]
+# Event types removed from the feed entirely. The feed tracks security events
+# (Intrusion / Malware / File / Security Intelligence); Connection flow logs are
+# dropped at ingest and excluded from every widget via _base_qs. (This also
+# zeroes traffic/bandwidth metrics, which were derived from Connection events.)
+DROP_EVENT_TYPES = ["Connection"]
 EVENT_WINDOW_DAYS = 7
 
 
@@ -134,10 +139,11 @@ def _base_qs(hours=None, site=None, device_type=None, groupby=GROUPBY_PROFILE):
             else qs.filter(site=site)
     if device_type and device_type != SITES_ALL:
         qs = qs.filter(**{_evt_col(groupby): device_type})
-    # Low / Informational are removed from the dashboard entirely — this one
-    # exclude covers every widget and every click-through table (all built on
-    # _base_qs), so they never appear in a count, chart or drill-down.
+    # Low / Informational severities AND Connection flow are removed from the
+    # dashboard entirely — these excludes cover every widget and click-through
+    # table (all built on _base_qs), so they never appear anywhere.
     qs = qs.exclude(severity__in=DROP_SEVERITIES)
+    qs = qs.exclude(event_type__in=DROP_EVENT_TYPES)
     return qs
 
 
@@ -498,7 +504,8 @@ def device_360(mac):
     cutoff = timezone.now() - timedelta(days=EVENT_WINDOW_DAYS)
     events = [event_store._to_dict(e) for e in SecurityEvent.objects
               .filter(device_mac=mac, ts__gte=cutoff)
-              .exclude(severity__in=DROP_SEVERITIES).order_by("ts")]
+              .exclude(severity__in=DROP_SEVERITIES)
+              .exclude(event_type__in=DROP_EVENT_TYPES).order_by("ts")]
     if not events:
         return {"found": False, "mac": mac}
 

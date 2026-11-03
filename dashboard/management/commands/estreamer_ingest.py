@@ -66,6 +66,11 @@ class Command(BaseCommand):
                  "security-relevant connections (blocked / insecure-protocol / "
                  "zone-violation), relabelled as threats, and drop benign flow.")
         parser.add_argument(
+            "--keep-connections", action="store_true",
+            help="keep Connection flow events. Default: DROP all Connection "
+                 "events at ingest — the feed tracks security events only "
+                 "(Intrusion/Malware/File/Security-Intelligence).")
+        parser.add_argument(
             "--keep-low", action="store_true",
             help="keep Low / Informational severity events. Default: DROP them "
                  "at ingest so only Critical/High/Medium reach the DB (matches "
@@ -94,15 +99,16 @@ class Command(BaseCommand):
         store_all = opts["store_all"]
         keep_threats = opts["keep_threats"]
         all_connections = opts["all_connections"]
+        keep_connections = opts["keep_connections"]
         keep_low = opts["keep_low"]
         progress = opts["progress"]
         _THREATS = ("Intrusion", "Malware", "Security Intelligence")
-        from dashboard.analytics import DROP_SEVERITIES
+        from dashboard.analytics import DROP_EVENT_TYPES, DROP_SEVERITIES
 
         ise_map = event_store.ise_identity_map()
         ip_map = event_store.ise_ip_map()
         batch, total, captured = [], 0, 0
-        seen, dropped, no_ip, benign, lowinfo = 0, 0, 0, 0, 0
+        seen, dropped, no_ip, benign, lowinfo, conn = 0, 0, 0, 0, 0, 0
         last_refresh = time.time()
         last_progress, last_seen = last_refresh, 0
 
@@ -152,8 +158,17 @@ class Command(BaseCommand):
                 ev = mapping.map_event(raw)
                 event_store.enrich_with_ise(ev, ise_map, ip_map)
 
+                # --- drop Connection flow entirely: the feed is security events
+                #     (Intrusion/Malware/File/Security-Intelligence), not flow logs ---
+                if not store_all and not keep_connections \
+                        and ev.get("event_type") in DROP_EVENT_TYPES:
+                    conn += 1
+                    dropped += 1
+                    continue
+
                 # --- keep only security-relevant connections (relabel risky
-                #     flows as threats; drop benign allowed flow) ---
+                #     flows as threats; drop benign allowed flow) - only reached
+                #     when --keep-connections is set ---
                 if not store_all and not all_connections:
                     if not mapping.classify_and_keep(ev):
                         benign += 1
@@ -180,8 +195,8 @@ class Command(BaseCommand):
                     pct = (100.0 * dropped / seen) if seen else 0.0
                     self.stderr.write(
                         f"[ingest] seen={seen} stored={total} dropped={dropped} "
-                        f"(no-ip={no_ip}, benign={benign}, low/info={lowinfo}, "
-                        f"{pct:.1f}% filtered) in={rate:.0f}/s")
+                        f"(no-ip={no_ip}, conn={conn}, benign={benign}, "
+                        f"low/info={lowinfo}, {pct:.1f}% filtered) in={rate:.0f}/s")
                     last_progress, last_seen = now, seen
 
                 if now - last_refresh > 300:
@@ -203,5 +218,6 @@ class Command(BaseCommand):
         if not capture_only:
             self.stdout.write(self.style.SUCCESS(
                 f"\nIngested {total} IoT security events (seen {seen}, dropped "
-                f"{dropped}: {no_ip} no-IP + {benign} benign-conn + {lowinfo} "
-                f"low/info + {dropped - no_ip - benign - lowinfo} non-IoT)."))
+                f"{dropped}: {no_ip} no-IP + {conn} connection + {benign} "
+                f"benign-conn + {lowinfo} low/info + "
+                f"{dropped - no_ip - conn - benign - lowinfo} non-IoT)."))
