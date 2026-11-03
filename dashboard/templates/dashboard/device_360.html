@@ -62,12 +62,12 @@
       <h6 class="card-title">Risk Summary</h6>
       <div class="row text-center g-2">
         <div class="col"><div class="h3 mb-0">{{ d.risk.total_events }}</div><div class="small text-muted">Events</div></div>
-        <div class="col"><div class="h3 mb-0 text-danger">{{ d.risk.threat_events }}</div><div class="small text-muted">Threats</div></div>
+        <div class="col"><div class="h3 mb-0 text-danger">{{ d.risk.threat_events }}</div><div class="small text-muted">Events</div></div>
         <div class="col"><div class="h3 mb-0">{{ d.risk.blocked }}</div><div class="small text-muted">Blocked</div></div>
         <div class="col"><div class="h3 mb-0">{{ d.traffic.total_mb }}</div><div class="small text-muted">Total MB</div></div>
       </div>
       <hr>
-      <div class="small"><strong>Threat types:</strong> {{ d.risk.threat_types|default:"—" }}</div>
+      <div class="small"><strong>Event types:</strong> {{ d.risk.threat_types|default:"—" }}</div>
       <div class="mt-2">
         {% if d.flags.insecure_protocol %}<span class="badge bg-danger">Insecure protocol: {{ d.flags.insecure_apps }}</span>{% endif %}
         {% if d.flags.zone_violation %}<span class="badge bg-warning text-dark">Outside allowed zone</span>{% endif %}
@@ -137,11 +137,11 @@
 
 <!-- Events table -->
 <div class="card shadow-sm mt-3"><div class="card-body">
-  <h6 class="card-title">Threat &amp; connection events for this device ({{ d.events|length }})</h6>
+  <h6 class="card-title">Events for this device ({{ d.events|length }})</h6>
   <div class="table-responsive">
     <table id="dev-events" class="table table-sm table-striped table-hover w-100">
       <thead class="table-dark"><tr>
-        <th>Time</th><th>Type</th><th>Severity</th><th>Threat</th><th>Action</th>
+        <th>Time</th><th>Type</th><th>Severity</th><th>Name</th><th>Action</th>
         <th>Dest IP</th><th>Country</th><th>App</th><th>Proto/Port</th><th>Rule</th>
       </tr></thead>
       <tbody>
@@ -187,13 +187,13 @@
       datasets:[
         { type:'bar', label:'Traffic (MB)', yAxisID:'y',
           data: daily.map(d=>d.traffic_mb), backgroundColor:'rgba(13,110,253,0.5)' },
-        { type:'line', label:'Threat events', yAxisID:'y1',
+        { type:'line', label:'Events', yAxisID:'y1',
           data: daily.map(d=>d.threats), borderColor:'#dc3545',
           backgroundColor:'#dc3545', tension:0.3 }
       ] },
     options: { scales:{
       y:{ position:'left', title:{display:true,text:'MB'} },
-      y1:{ position:'right', title:{display:true,text:'Threats'}, grid:{drawOnChartArea:false} }
+      y1:{ position:'right', title:{display:true,text:'Events'}, grid:{drawOnChartArea:false} }
     } }
   });
 

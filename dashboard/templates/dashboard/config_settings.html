@@ -21,7 +21,7 @@
     <form method="post" class="row g-3">
       {% csrf_token %}
       <div class="col-sm-6">
-        <label class="form-label small fw-semibold">Threat events (days)</label>
+        <label class="form-label small fw-semibold">Events (days)</label>
         <input type="number" name="retention_threat_days" min="1" max="3650"
                class="form-control" value="{{ retention_threat_days }}">
         <div class="form-text">Intrusion / Malware / SI / File events.</div>

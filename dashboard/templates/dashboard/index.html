@@ -59,7 +59,7 @@
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
         <div class="text-muted small text-uppercase">W2 · Devices at Risk</div>
         <div class="fw-bold fs-2 text-danger">{{ widgets.at_risk|comma }}</div>
-        <div class="small text-muted">With threat events · {{ filters.range }}</div>
+        <div class="small text-muted">With events · {{ filters.range }}</div>
       </div></div>
     </a>
   </div>
@@ -75,16 +75,16 @@
   <div class="col-6 col-lg">
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
-        <div class="text-muted small text-uppercase">W4 · Threat Events ({{ filters.range }})</div>
+        <div class="text-muted small text-uppercase">W4 · Events ({{ filters.range }})</div>
         <div class="fw-bold fs-2">{{ widgets.threats_window|compact }}</div>
-        <div class="small text-muted">Traffic &amp; threat trend ↓</div>
+        <div class="small text-muted">Event trend ↓</div>
       </div></div>
     </a>
   </div>
   <div class="col-6 col-lg">
     <a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}&severity=Critical">
       <div class="card widget shadow-sm h-100"><div class="card-body text-center">
-        <div class="text-muted small text-uppercase">W5 · Critical Attacks</div>
+        <div class="text-muted small text-uppercase">W5 · Critical Events</div>
         <div class="fw-bold fs-2 text-danger">{{ widgets.critical|comma }}</div>
         <div class="small text-muted">Highest severity · {{ filters.range }}</div>
       </div></div>
@@ -105,7 +105,7 @@
 <div class="row g-3 mb-4">
   <div class="col-lg-4">
     <div class="card shadow-sm h-100"><div class="card-body">
-      <h6 class="card-title">Attack Severity <span class="text-muted small">(Widget 5 · {{ filters.range }})</span>
+      <h6 class="card-title">Event Severity <span class="text-muted small">(Widget 5 · {{ filters.range }})</span>
         <div class="btn-group btn-group-sm float-end" role="group">
           <button type="button" class="btn btn-outline-secondary active" onclick="sevToggle('sevAll','doughnut',this)">Pie</button>
           <button type="button" class="btn btn-outline-secondary" onclick="sevToggle('sevAll','bar',this)">Bar</button>
@@ -116,7 +116,7 @@
   </div>
   <div class="col-lg-8">
     <div class="card shadow-sm h-100"><div class="card-body">
-      <h6 class="card-title">Traffic &amp; Threat Trend — {{ filters.range }}
+      <h6 class="card-title">Event Trend — {{ filters.range }}
         <span class="text-muted small">(Widget 4 · per {{ filters.granularity }})</span></h6>
       <canvas id="trendAll" height="90"></canvas>
     </div></div>
@@ -131,7 +131,7 @@
     <table id="type-table" class="table table-sm table-hover align-middle w-100 mb-0">
       <thead class="table-dark"><tr>
         <th>Device type</th><th class="text-end">Devices</th><th class="text-end">Events</th>
-        <th class="text-end">Threats</th><th class="text-end">Critical</th>
+        <th class="text-end">Critical</th>
         <th class="text-end">Traffic (MB)</th><th class="text-end">% Blocked</th>
         <th class="text-end">Compliance</th>
       </tr></thead>
@@ -140,9 +140,8 @@
         <tr class="{% if selected_type == t.device_type %}table-primary{% endif %}">
           <td class="fw-semibold">{{ t.device_type }}</td>
           <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'ise-endpoints' %}?{{ t.q }}" title="View devices">{{ t.devices|comma }}</a></td>
-          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}" title="View events">{{ t.events|compact }}</a></td>
-          <td class="text-end fw-bold text-danger"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;threats=1" title="View threat events">{{ t.threats|comma }}</a></td>
-          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;severity=Critical&amp;threats=1" title="View critical events">{{ t.critical|comma }}</a></td>
+          <td class="text-end fw-bold"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}" title="View events">{{ t.events|compact }}</a></td>
+          <td class="text-end"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ t.q }}&amp;severity=Critical" title="View critical events">{{ t.critical|comma }}</a></td>
           <td class="text-end">{{ t.traffic_mb|compact }}</td>
           <td class="text-end">{{ t.pct_blocked }}%</td>
           <td class="text-end fw-semibold {% if t.compliance >= 90 %}text-success{% elif t.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}"><a class="text-reset text-decoration-none" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ t.q }}" title="View at-risk devices">{{ t.compliance }}%</a></td>
@@ -197,7 +196,7 @@
         <div class="card-body p-2 text-center">
           <div class="small fw-semibold text-truncate">{{ t.device_type }}</div>
           <div class="h4 mb-0 text-danger">{{ t.threats|comma }}</div>
-          <div class="small text-muted">threats</div>
+          <div class="small text-muted">events</div>
           <div class="small mt-1">{{ t.devices }} devices · {{ t.traffic_mb|compact }} MB</div>
           <div class="small text-muted">{{ t.critical|comma }} critical · {{ t.pct_blocked }}% blocked</div>
           <div class="small fw-semibold {% if t.compliance >= 90 %}text-success{% elif t.compliance >= 70 %}text-warning{% else %}text-danger{% endif %}">{{ t.compliance }}% compliant</div>
@@ -234,7 +233,7 @@
       <div class="text-muted small text-uppercase">Quarantined</div>
       <div class="h2 mb-0 text-warning">{{ type_metrics.quarantined|comma }}</div></div></div></a></div>
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
-      <div class="text-muted small text-uppercase">Threat Events</div>
+      <div class="text-muted small text-uppercase">Events</div>
       <div class="h2 mb-0">{{ type_metrics.threats|compact }}</div></div></div></a></div>
     <div class="col-6 col-lg-2"><a class="text-decoration-none" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}&severity=Critical"><div class="card widget shadow-sm h-100"><div class="card-body text-center">
       <div class="text-muted small text-uppercase">Critical</div>
@@ -254,7 +253,7 @@
   <div class="row g-3 mb-3">
     <div class="col-lg-4">
       <div class="card shadow-sm h-100"><div class="card-body">
-        <h6 class="card-title">Attack Severity — {{ selected_type }}
+        <h6 class="card-title">Event Severity — {{ selected_type }}
           <div class="btn-group btn-group-sm float-end" role="group">
             <button type="button" class="btn btn-outline-secondary active" onclick="sevToggle('sevType','doughnut',this)">Pie</button>
             <button type="button" class="btn btn-outline-secondary" onclick="sevToggle('sevType','bar',this)">Bar</button>
@@ -265,7 +264,7 @@
     </div>
     <div class="col-lg-8">
       <div class="card shadow-sm h-100"><div class="card-body">
-        <h6 class="card-title">Traffic &amp; Threat Trend — {{ selected_type }} ({{ filters.range }})</h6>
+        <h6 class="card-title">Event Trend — {{ selected_type }} ({{ filters.range }})</h6>
         <canvas id="trendType" height="90"></canvas>
       </div></div>
     </div>
@@ -322,12 +321,12 @@
         datasets:[
           { type:'bar', label:'Traffic (MB)', yAxisID:'y',
             data:points.map(p=>p.traffic_mb), backgroundColor:'rgba(13,110,253,0.5)' },
-          { type:'line', label:'Threat events', yAxisID:'y1',
+          { type:'line', label:'Events', yAxisID:'y1',
             data:points.map(p=>p.threats), borderColor:'#dc3545', backgroundColor:'#dc3545', tension:0.3 }
         ] },
       options:{ scales:{
         y:{ position:'left', title:{display:true,text:'MB'} },
-        y1:{ position:'right', title:{display:true,text:'Threats'}, grid:{drawOnChartArea:false} } } } });
+        y1:{ position:'right', title:{display:true,text:'Events'}, grid:{drawOnChartArea:false} } } } });
   }
   donut('sevAll', {{ severity_json|safe }});
   trend('trendAll', {{ trend_json|safe }});
@@ -335,7 +334,7 @@
   donut('sevType', {{ type_severity_json|safe }});
   trend('trendType', {{ type_trend_json|safe }});
   {% endif %}
-  $(function(){ $('#type-table').DataTable({ paging:false, searching:false, info:false, order:[[3,'desc']] }); });
+  $(function(){ $('#type-table').DataTable({ paging:false, searching:false, info:false, order:[[2,'desc']] }); });
 
   // Device-row tables stream in only on click — the dashboard itself is numbers.
   $(function(){

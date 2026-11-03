@@ -79,7 +79,7 @@
     <div class="col-6 col-md-4 col-xl-2">
       <a class="kpi red" href="{% url 'dashboard:dataset' 'sim-devices-at-risk' %}?{{ overall_q }}">
         <span class="bar"></span><div class="lab">Devices at risk</div>
-        <div class="val">{{ widgets.at_risk|comma }}</div><div class="sub">Medium+ threats</div></a>
+        <div class="val">{{ widgets.at_risk|comma }}</div><div class="sub">Medium+ events</div></a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
       <a class="kpi amber" href="{% url 'dashboard:dataset' 'ise-quarantined' %}?{{ overall_q }}">
@@ -88,7 +88,7 @@
     </div>
     <div class="col-6 col-md-4 col-xl-2">
       <a class="kpi" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ overall_q }}&amp;threats=1">
-        <span class="bar"></span><div class="lab">Threat events</div>
+        <span class="bar"></span><div class="lab">Events</div>
         <div class="val">{{ widgets.threats_window|compact }}</div><div class="sub">{{ filters.range }}</div></a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
@@ -108,7 +108,7 @@
   <div class="row g-3 mb-3">
     <div class="col-lg-4">
       <div class="panel">
-        <h6 class="sec d-flex justify-content-between">Attack severity
+        <h6 class="sec d-flex justify-content-between">Event severity
           <span class="btn-group btn-group-sm" role="group">
             <button type="button" class="btn btn-outline-secondary active" onclick="sevToggle('sevSoc','doughnut',this)">Pie</button>
             <button type="button" class="btn btn-outline-secondary" onclick="sevToggle('sevSoc','bar',this)">Bar</button>
@@ -118,7 +118,7 @@
     </div>
     <div class="col-lg-8">
       <div class="panel">
-        <h6 class="sec">Traffic &amp; threat trend — {{ filters.range }}</h6>
+        <h6 class="sec">Event trend — {{ filters.range }}</h6>
         <canvas id="trendSoc" height="110"></canvas>
       </div>
     </div>
@@ -184,7 +184,7 @@
           <div class="val">{{ type_metrics.quarantined|comma }}</div></a></div>
       <div class="col-6 col-md-3 col-xl">
         <a class="kpi" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}&amp;threats=1">
-          <span class="bar"></span><div class="lab">Threats</div>
+          <span class="bar"></span><div class="lab">Events</div>
           <div class="val">{{ type_metrics.threats|compact }}</div></a></div>
       <div class="col-6 col-md-3 col-xl">
         <a class="kpi red" href="{% url 'dashboard:dataset' 'sim-events' %}?{{ type_q }}&amp;severity=Critical&amp;threats=1">
@@ -232,13 +232,13 @@
 
   <!-- device-type table -->
   <div class="panel">
-    <h6 class="sec mb-2">Device types — ranked by threats</h6>
+    <h6 class="sec mb-2">Device types — ranked by events</h6>
     <div class="table-responsive">
       <table class="table table-sm table-hover align-middle mb-0">
         <thead><tr>
           <th>Device type</th><th class="text-end">Devices</th>
           <th class="text-end">At risk</th><th class="text-end">Quarantined</th>
-          <th class="text-end">Threats</th><th class="text-end">Critical</th>
+          <th class="text-end">Events</th><th class="text-end">Critical</th>
           <th class="text-end">Compliance</th>
         </tr></thead>
         <tbody>
@@ -283,7 +283,7 @@
     const el=document.getElementById(id); if(!el) return;
     new Chart(el,{ data:{labels:points.map(p=>p.display), datasets:[
         {type:'bar',label:'Traffic (MB)',yAxisID:'y',data:points.map(p=>p.traffic_mb),backgroundColor:'rgba(34,211,238,.35)'},
-        {type:'line',label:'Threats',yAxisID:'y1',data:points.map(p=>p.threats),borderColor:'#ef4444',backgroundColor:'#ef4444',tension:.3}
+        {type:'line',label:'Events',yAxisID:'y1',data:points.map(p=>p.threats),borderColor:'#ef4444',backgroundColor:'#ef4444',tension:.3}
       ]},
       options:{plugins:{legend:{labels:{boxWidth:12}}},scales:{
         y:{position:'left',grid:{color:gridColor()}}, x:{grid:{display:false}},
