@@ -22,6 +22,10 @@ SEVERITY_ORDER = ["Critical", "High", "Medium", "Low", "Informational"]
 # A "threat" counts only Medium severity and above (drop Low / Informational
 # noise). Used consistently for threat counts, devices-at-risk and compliance.
 THREAT_SEVERITIES = ["Critical", "High", "Medium"]
+# Severities treated as noise and removed from the dashboard ENTIRELY: excluded
+# from every tile/chart/table/drill-down (via _base_qs) AND dropped at ingest so
+# they never reach the DB. Only Critical/High/Medium are kept anywhere.
+DROP_SEVERITIES = ["Low", "Informational"]
 EVENT_WINDOW_DAYS = 7
 
 
@@ -130,6 +134,10 @@ def _base_qs(hours=None, site=None, device_type=None, groupby=GROUPBY_PROFILE):
             else qs.filter(site=site)
     if device_type and device_type != SITES_ALL:
         qs = qs.filter(**{_evt_col(groupby): device_type})
+    # Low / Informational are removed from the dashboard entirely — this one
+    # exclude covers every widget and every click-through table (all built on
+    # _base_qs), so they never appear in a count, chart or drill-down.
+    qs = qs.exclude(severity__in=DROP_SEVERITIES)
     return qs
 
 
@@ -489,7 +497,8 @@ def device_360(mac):
 
     cutoff = timezone.now() - timedelta(days=EVENT_WINDOW_DAYS)
     events = [event_store._to_dict(e) for e in SecurityEvent.objects
-              .filter(device_mac=mac, ts__gte=cutoff).order_by("ts")]
+              .filter(device_mac=mac, ts__gte=cutoff)
+              .exclude(severity__in=DROP_SEVERITIES).order_by("ts")]
     if not events:
         return {"found": False, "mac": mac}
 

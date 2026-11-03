@@ -66,6 +66,11 @@ class Command(BaseCommand):
                  "security-relevant connections (blocked / insecure-protocol / "
                  "zone-violation), relabelled as threats, and drop benign flow.")
         parser.add_argument(
+            "--keep-low", action="store_true",
+            help="keep Low / Informational severity events. Default: DROP them "
+                 "at ingest so only Critical/High/Medium reach the DB (matches "
+                 "the dashboard, which excludes Low/Informational entirely).")
+        parser.add_argument(
             "--progress", type=int, default=30,
             help="seconds between throughput lines (seen/stored/drop%%) on "
                  "stderr. 0 = off. Default 30.")
@@ -89,13 +94,15 @@ class Command(BaseCommand):
         store_all = opts["store_all"]
         keep_threats = opts["keep_threats"]
         all_connections = opts["all_connections"]
+        keep_low = opts["keep_low"]
         progress = opts["progress"]
         _THREATS = ("Intrusion", "Malware", "Security Intelligence")
+        from dashboard.analytics import DROP_SEVERITIES
 
         ise_map = event_store.ise_identity_map()
         ip_map = event_store.ise_ip_map()
         batch, total, captured = [], 0, 0
-        seen, dropped, no_ip, benign = 0, 0, 0, 0
+        seen, dropped, no_ip, benign, lowinfo = 0, 0, 0, 0, 0
         last_refresh = time.time()
         last_progress, last_seen = last_refresh, 0
 
@@ -153,6 +160,14 @@ class Command(BaseCommand):
                         dropped += 1
                         continue
 
+                # --- drop Low / Informational: the dashboard excludes them
+                #     entirely, so don't spend DB space on them ---
+                if not store_all and not keep_low \
+                        and ev.get("severity") in DROP_SEVERITIES:
+                    lowinfo += 1
+                    dropped += 1
+                    continue
+
                 batch.append(ev)
 
                 if len(batch) >= opts["batch"]:
@@ -165,8 +180,8 @@ class Command(BaseCommand):
                     pct = (100.0 * dropped / seen) if seen else 0.0
                     self.stderr.write(
                         f"[ingest] seen={seen} stored={total} dropped={dropped} "
-                        f"(no-ip={no_ip}, benign={benign}, {pct:.1f}% filtered) "
-                        f"in={rate:.0f}/s")
+                        f"(no-ip={no_ip}, benign={benign}, low/info={lowinfo}, "
+                        f"{pct:.1f}% filtered) in={rate:.0f}/s")
                     last_progress, last_seen = now, seen
 
                 if now - last_refresh > 300:
@@ -188,5 +203,5 @@ class Command(BaseCommand):
         if not capture_only:
             self.stdout.write(self.style.SUCCESS(
                 f"\nIngested {total} IoT security events (seen {seen}, dropped "
-                f"{dropped}: {no_ip} no-IP + {benign} benign-conn + "
-                f"{dropped - no_ip - benign} non-IoT)."))
+                f"{dropped}: {no_ip} no-IP + {benign} benign-conn + {lowinfo} "
+                f"low/info + {dropped - no_ip - benign - lowinfo} non-IoT)."))
